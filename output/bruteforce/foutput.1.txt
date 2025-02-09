@@ -1,0 +1,8 @@
+ nr= 2 items= 8 nmax= 32769
+For combo time: 9 milliseconds
+For loop parallel time: 9 milliseconds
+number of threads: 1
+rank: 0 global_max: 1614404.561476
+Total reduction parallel time: 0 milliseconds
+For comboCall parallel time: 12 milliseconds
+Time taken: 0 seconds
