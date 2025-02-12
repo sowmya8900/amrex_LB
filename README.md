@@ -109,7 +109,7 @@ These instructions will get you a copy of the project up and running on your loc
 
 1. First clone the repository to your local machine:
    ```
-   git clone https://github.com/amitashnanda/ACM_PEARC.git
+   git clone https://github.com/amitashnanda/ACM_PEARC_2025_Paper_Artifact.git
 
    cd ACM_PEARC_2025_Paper_Artifact
 
