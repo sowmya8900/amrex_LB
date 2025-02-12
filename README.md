@@ -109,9 +109,9 @@ These instructions will get you a copy of the project up and running on your loc
 
 1. First clone the repository to your local machine:
    ```
-   git clone https://github.com/amitashnanda/PASC_2025_Paper_Artifact.git
+   git clone https://github.com/amitashnanda/ACM_PEARC.git
 
-   cd PASC_2025_Paper_Artifact
+   cd ACM_PEARC_2025_Paper_Artifact
 
    ```
 2. Install and Build AMReX from the step here:
@@ -145,7 +145,7 @@ These instructions will get you a copy of the project up and running on your loc
 1. Navigate to the ```optimized_algorithms``` directory
 
    ```
-   cd /path/to/PASC_2025_Paper_Artifact/src/optimized_algorithms/
+   cd /path/to/ACM_PEARC_2025_Paper_Artifact/src/optimized_algorithms/
 
    ```
 2. Configure the Makefile:
