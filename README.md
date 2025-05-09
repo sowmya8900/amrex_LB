@@ -1,82 +1,34 @@
-# Exploring Dynamic Load Balancing Algorithms for Block-Structured Mesh-and-Particle Simulations in AMReX
-
-
+# AMReX Load Balancing Development, Testing & Exploration Repo
 
 ## **Introduction**
+This repo is used to develop, test and evaluate new load balancing algorithms and strategies,
+specifically for the framework, AMReX.
 
+It includes varieties and variations of load balancing algorithms, codes to test and compare
+algorithms on different weights and weight distributions, Jupyter notebooks and other tools 
+to evaluate and explore the load balancing state of AMReX codes and code to collect and print
+load balancing metrics and weights from AMReX applications.
 
-**Submitted to "ACM PEARC (Practice & Experience in Advanced Research Computing) conference 2025"**
-
-This is the reproducibility artifact four our submitted paper. It includes our developed algorithms along with the AMReX framework. 
-
-<!-- ## **Abstract** -->
-
-<!-- Load balancing is a critical requirement for successful large-scale HPC simulations. However, traditional load-balancing strategies have competing limitations. In this research, we explore dynamic novel hybrid load balancing algorithms, starting with Bruteforce and then Knapsack and SFC, and then combining both Knapsack and SFC and SFC Painter Partition. The result stated that the Painter SFC method is the optimal algorithm for real-world applications. Initial investigations into building this algorithm are outlined as the first steps toward applying this novel algorithm to a WarpX simulation. -->
-
-<!-- ## **Background** -->
-
-<!-- **What is AMReX**
-
-AMReX is the block-structured adaptive mesh refinement (AMR) software framework for solving partial differential
-equations (PDEs).
-
-• AMR is a common cause of load imbalance during simulations. Multi-level meshes lead to complex load distributions that require careful balancing to obtain optimal runtime.
-
-• AMReX provides the necessary tools to manage and optimize computational meshes, particles, parallel processing, input/output, and visualization for high-performance simulations. -->
-
-
-<!-- 
-**What is Load Balancing**
-
-• Load balancing is a process of distributing computational tasks evenly across available processors or nodes to maximize   efficiency and minimize idle time.
-
-• AMReX provides Space-filling curve and Knapsack load balancing algorithms.
-
-
-![alt text](./result/perlmutter.png) -->
 
 ## **Folder Structure**
 
 ```
-ACM_PEARC_2025_Paper_Artifact
+amrex_LB
 │
 └─── notebooks                               <- jupyter-notebooks to plot all the obtained outputs         
-│        │ 
-│        └───metrics_calculation_avg.ipynb           
-│        └───metrics_calculation_best.ipynb
-│        └───metrics_calculation_worst.ipynb
-│        └───requirements.yaml
-│        └───README.md
 │
 └───output                                   <- this directory stores all the outputs (run_100 and run_250 
 │                                               are no of times we ran the optimized algorithms.)                            
-│       │ 
-│       └─── bruteforce
-│       └─── run_100
-│       └─── run_250
-│
+│   
 └───result                                   <- this directory stores all the analysis plots  
 │
 └───src
 │    │ 
 │    └───bruteForce                          <-  bruteforce experimentation     
-│    │      │ 
-│    │      └───bruteForce.cpp
-│    │      └───bruteforce_experiment.sh
+│    │ 
 │    │  
 │    └───optimized_algorithm                  <- existing and developed dynamic load balancing algorithms
-│           │ 
-│           └───SFC.cpp/SFC.H
-│           └───SFC_knapsack.cpp/SFC_knapsack.H
-│           └───Knapsack.cpp/Knapsack.H
-│           └───PainterPartition.cpp/PainterPartition.H
-│           └───main.cpp
-│           └───Make.package
-│           └───GNUmakefile 
-│           └───experiment.sh
-│           └───run.sh
-│           └───inputs  
-│     
+|
 └───LICENSE
 └───README.md
     
@@ -98,9 +50,6 @@ ACM_PEARC_2025_Paper_Artifact
 - **MPI:** OpenMPI for parallel execution (if required). 
 
 
-
-
-   
 ## **Getting Started**
 
 These instructions will get you a copy of the project up and running on your local machine for development and testing purposes.
@@ -109,7 +58,7 @@ These instructions will get you a copy of the project up and running on your loc
 
 1. First clone the repository to your local machine:
    ```
-   git clone https://github.com/amitashnanda/ACM_PEARC_2025_Paper_Artifact.git
+   git clone https://github.com/kngott/amrex_LB.git
 
    cd ACM_PEARC_2025_Paper_Artifact
 
@@ -145,7 +94,7 @@ These instructions will get you a copy of the project up and running on your loc
 1. Navigate to the ```optimized_algorithms``` directory
 
    ```
-   cd /path/to/ACM_PEARC_2025_Paper_Artifact/src/optimized_algorithms/
+   cd /path/to/amrex_LB/src/optimized_algorithms/
 
    ```
 2. Configure the Makefile:
@@ -186,63 +135,22 @@ These instructions will get you a copy of the project up and running on your loc
 
    ```
 
-
-<!-- ## **Contributing**
-
-1. Fork the Repository:
-
-   Click the "Fork" button on the top right of the repository page.
-
-2. Clone Your Fork:
-   ```
-   git clone https://github.com/yourusername/PASC_2025_Paper_Artifact.git
-
-   cd PASC_2025_Paper_Artifact
-
-   ```
-3. Create a New Branch:
-
-   ```
-   git checkout -b feature/YourFeatureName
-
-   ```
-4. Make Your Changes: 
-
-   Implement your feature or bug fix.
-
-5. Commit Your Changes:
-
-   ```
-   git commit -m "Add feature: YourFeatureDescription"
-
-   ```
-
-6. Push to Your Fork:
-
-   ```
-   git push origin feature/YourFeatureName
-
-   ``` -->
-
 ## **License**
 
-This project is licensed under the [Apache License](LICENSE).
+This repo uses the same license as the AMReX repo.
 
+## **Authors**
+Kevin Gott
+Md Kamal
+Amitash Nanda
+Hannah Ross
 
+Plus, the BoxLib and AMReX authors of the original load balancing algorithms.
 
 ## **Acknowledgments**
-
 1. **AMReX Team**
 2. **Perlmutter Supercomputer**
 3. **Lawrence Berkeley National Laboratory**
 4. **National Energy Research Scientific Computing Center**
 5. **University of California San Diego (Boolean Lab)**
 6. **The University of Alabama**
-
-
-
-
-
-
-
-
