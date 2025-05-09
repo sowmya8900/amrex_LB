@@ -140,9 +140,9 @@ These instructions will get you a copy of the project up and running on your loc
 This repo uses the same license as the AMReX repo.
 
 ## **Authors**
-Kevin Gott
-Md Kamal
-Amitash Nanda
+Kevin Gott \
+Md Kamal Chowdhury\
+Amitash Nanda \
 Hannah Ross
 
 Plus, the BoxLib and AMReX authors of the original load balancing algorithms.
