@@ -10,7 +10,7 @@
 #SBATCH --account=nintern
 ##SBATCH --mail-type=begin,end,fail
 #SBATCH --mail-type=end,fail
-#SBATCH --mail-user=ananda@ucsd.edu
+#SBATCH --mail-user=syellapragada@lbl.gov
 #SBATCH --output="%A-lb.out"
 
 ./experiment.sh 

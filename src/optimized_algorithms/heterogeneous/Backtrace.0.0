@@ -1,0 +1,53 @@
+Host Name: login29
+=== If no file names and line numbers are shown below, one can run
+            addr2line -Cpfie my_exefile my_line_address
+    to convert `my_line_address` (e.g., 0x4a6b) into file name and line number.
+    Or one can use amrex/Tools/Backtrace/parse_bt.py.
+
+=== Please note that the line number reported by addr2line may not be accurate.
+    One can use
+            readelf -wl my_exefile | grep my_line_address'
+    to find out the offset for that line.
+
+ 0: ./main3d.gnu.x86-milan.OMP.ex() [0x5f5c0f]
+    _ZN5amrex11BLBackTrace20print_backtrace_infoEP8_IO_FILE inlined at ../../../../amrex/Src/Base/AMReX_BLBackTrace.cpp:101:42 in _ZN5amrex11BLBackTrace7handlerEi
+../../../../amrex/Src/Base/AMReX_BLBackTrace.cpp:215:36
+_ZN5amrex11BLBackTrace7handlerEi
+../../../../amrex/Src/Base/AMReX_BLBackTrace.cpp:101:42
+
+ 1: /lib64/libc.so.6(+0x4ad70) [0x7fc958881d70]
+
+ 2: ./main3d.gnu.x86-milan.OMP.ex() [0x420c18]
+    _ZN5amrex15HeterogeneousLB19UpdateOrderedRatiosEv
+/global/homes/s/sowmyay2/amrex_LB/src/optimized_algorithms/heterogeneous/HeterogeneousLB.cpp:555:43
+
+ 3: ./main3d.gnu.x86-milan.OMP.ex() [0x42abe5]
+    _ZN5amrex15HeterogeneousLB10RijBalanceERKNS_8BoxArrayERKNS_8MultiFabE
+/global/homes/s/sowmyay2/amrex_LB/src/optimized_algorithms/heterogeneous/HeterogeneousLB.cpp:632:56
+
+ 4: ./main3d.gnu.x86-milan.OMP.ex() [0x42b60e]
+    _ZN5amrex15HeterogeneousLB11BalanceLoadERKNS_8BoxArrayERKNS_8MultiFabERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE
+/global/homes/s/sowmyay2/amrex_LB/src/optimized_algorithms/heterogeneous/HeterogeneousLB.cpp:258:1
+
+ 5: ./main3d.gnu.x86-milan.OMP.ex() [0x42f4b3]
+    _ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7_M_dataEv inlined at /usr/include/c++/13/bits/basic_string.h:264:13 in _Z12example_mainv
+/usr/include/c++/13/bits/basic_string.h:223:28
+_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE11_M_is_localEv
+/usr/include/c++/13/bits/basic_string.h:264:13
+_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE10_M_disposeEv
+/usr/include/c++/13/bits/basic_string.h:282:18
+_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEED4Ev
+/usr/include/c++/13/bits/basic_string.h:804:19
+_Z12example_mainv
+/global/homes/s/sowmyay2/amrex_LB/src/optimized_algorithms/heterogeneous/example.cpp:54:52
+
+ 6: ./main3d.gnu.x86-milan.OMP.ex() [0x41ab0e]
+    main
+/global/homes/s/sowmyay2/amrex_LB/src/optimized_algorithms/heterogeneous/main.cpp:29:20
+
+ 7: /lib64/libc.so.6(__libc_start_main+0xef) [0x7fc95886c1fd]
+
+ 8: ./main3d.gnu.x86-milan.OMP.ex() [0x41aeda]
+    _start
+../sysdeps/x86_64/start.S:122
+

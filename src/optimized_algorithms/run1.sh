@@ -8,9 +8,6 @@
 #SBATCH --ntasks=1
 ##SBATCH --mem=1GB
 #SBATCH --account=nintern
-##SBATCH --mail-type=begin,end,fail
-#SBATCH --mail-type=end,fail
-#SBATCH --mail-user=ananda@ucsd.edu
 #SBATCH --output="%A-lb.out"
 
 ./experiment1.sh 

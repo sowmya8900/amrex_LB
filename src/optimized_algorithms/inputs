@@ -13,7 +13,7 @@ stdev = 250
 
 # stdev = 4523
 
-nruns = 250
+nruns = 10
 
 tiny_profiler.print_threshold = 0
 

@@ -1,0 +1,19 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "${workspaceFolder}/../amrex/Src/Base",
+                "${workspaceFolder}/../amrex-install/include",
+                "/opt/cray/pe/mpich/8.1.30/ofi/gnu/12.3/include"
+            ],
+            "defines": [],
+            "compilerPath": "/opt/cray/pe/craype/2.7.20/bin/CC",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "linux-gcc-x64"
+        }
+    ],
+    "version": 4
+} 

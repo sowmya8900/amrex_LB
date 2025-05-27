@@ -1,0 +1,3 @@
+CEXE_sources += HeterogeneousLB.cpp
+CEXE_sources += example.cpp
+CEXE_headers += HeterogeneousLB.H 
