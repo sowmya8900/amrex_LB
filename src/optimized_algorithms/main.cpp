@@ -14,6 +14,8 @@
 #include <map>
 #include <tuple>
 #include <set>
+#include <AMReX_BoxArray.H>
+#include <AMReX_DistributionMapping.H>
 
 
 #include "Util.H"
@@ -39,11 +41,106 @@ int main(int argc, char* argv[]) {
     amrex::Finalize();
 }
 
+// halo volume exchange metrics
+
+void LogHaloExchange(amrex::MultiFab& mf, const std::string& filename) {
+    // Fill ghost cells (this is where the exchange happens)
+    mf.FillBoundary();
+
+    const auto& dm = mf.DistributionMap();
+    const auto& ba = mf.boxArray();
+
+    // Map: neighbor rank -> number of ghost cells exchanged
+    std::map<int, long long> halo_exchange_volume;
+
+    // For each box owned by this rank, check which ghost cells overlap with boxes owned by other ranks
+    for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
+        const amrex::Box& valid_box = mfi.validbox(); // owned region
+        const amrex::Box& grown_box = mfi.growntilebox(); // includes ghost region
+        int my_rank = amrex::ParallelDescriptor::MyProc();
+
+        // Loop over all boxes to find overlaps in the ghost region
+        for (int j = 0; j < ba.size(); ++j) {
+            if (dm[j] == my_rank) continue; // skip self
+            const amrex::Box& neighbor_box = ba[j];
+            amrex::Box overlap = grown_box & neighbor_box;
+            if (!overlap.isEmpty() && !valid_box.contains(overlap)) {
+                // This overlap is in the ghost region and comes from another rank
+                halo_exchange_volume[dm[j]] += overlap.numPts();
+            }
+        }
+    }
+
+    // Write to file
+    std::ofstream outfile(filename);
+    for (const auto& [rank, volume] : halo_exchange_volume) {
+        outfile << "Neighbor rank: " << rank << " Halo exchange volume: " << volume << std::endl;
+    }
+    outfile.close();
+}
+
+// edge cut metrics - from AMReX_Graph.cpp
+bool are_face_neighbors(const amrex::Box& a, const amrex::Box& b) {
+    int n_touch = 0;
+    for (int d = 0; d < AMREX_SPACEDIM; ++d) {
+        if (a.bigEnd(d) + 1 == b.smallEnd(d) || b.bigEnd(d) + 1 == a.smallEnd(d)) {
+            // They are adjacent along this axis
+            n_touch++;
+        } else if (a.bigEnd(d) < b.smallEnd(d) - 1 || b.bigEnd(d) < a.smallEnd(d) - 1) {
+            // They are not adjacent nor overlapping
+            return false;
+        }
+    }
+    // They must be adjacent along exactly one axis and overlap along the others
+    return n_touch == 1;
+}
+
+void ComputeGraphCutMetrics(const amrex::BoxArray& ba, const amrex::DistributionMapping& dm, const std::string& filename) {
+    int nboxes = ba.size();
+    int my_rank = amrex::ParallelDescriptor::MyProc();
+    int cut_edges = 0, local_edges = 0, total_edges = 0;
+
+    std::set<std::pair<int, int>> counted_edges; // avoid double-counting
+
+    for (int i = 0; i < nboxes; ++i) {
+        const amrex::Box& box_i = ba[i];
+        int rank_i = dm[i];
+        // Loop over all possible neighbors (face neighbors)
+        for (int j = 0; j < nboxes; ++j) {
+            if (i == j) continue;
+            const amrex::Box& box_j = ba[j];
+            int rank_j = dm[j];
+            if (are_face_neighbors(box_i, box_j)) {
+                auto edge = std::minmax(i, j);
+                if (counted_edges.count(edge)) continue;
+                counted_edges.insert(edge);
+                total_edges++;
+                if (rank_i == rank_j) local_edges++;
+                else cut_edges++;
+            }
+        }
+    }
+    // Output
+    std::ofstream ofs(filename);
+    ofs << "TotalEdges " << total_edges << "\n";
+    ofs << "LocalEdges " << local_edges << "\n";
+    ofs << "CutEdges " << cut_edges << "\n";
+    ofs << "LocalFraction " << (double)local_edges / total_edges << "\n";
+    ofs << "CutFraction " << (double)cut_edges / total_edges << "\n";
+    ofs.close();
+}
+
+// distribution mapping function
 void output_distribution_data(const amrex::BoxArray& ba, 
                             const std::vector<int>& dmap,
                             const std::vector<Long>& costs,
                             const std::string& filename,
                             const std::string& algorithm_name) {
+    if (amrex::ParallelDescriptor::MyProc() != 0) return;
+
+    AMREX_ALWAYS_ASSERT(ba.size() == dmap.size());
+    AMREX_ALWAYS_ASSERT(ba.size() == costs.size());
+
     std::ofstream outfile(filename);
     if (!outfile.is_open()) {
         amrex::Print() << "Failed to open output file: " << filename << std::endl;
@@ -137,6 +234,9 @@ void main_main() {
     Box domain(IntVect{0}, (d_size -= 1));
     BoxArray ba(domain);
     ba.maxSize(mgs);
+    amrex::Print() << "domain       = " << domain << '\n';
+    amrex::Print() << "max_grid_size= " << mgs    << '\n';
+    amrex::Print() << "boxes.size() = " << ba.size() << '\n';
 
     int nitems = ba.size();
     int nranks = nnodes * ranks_per_node;
@@ -177,22 +277,24 @@ for (int r = 0; r<nruns; r++) {
 
     amrex::Real sfc_eff = 0.0, knapsack_eff = 0.0, hilbertsfc_eff = 0.0;
     int node_size = 0;
-    double time_start=0;
+    double time_start = 0;
+    int ng = nghost[0];
 
     time_start = amrex::second();
     std::vector<int> k_dmap = KnapSackDoIt(scaled_wgts, nranks, k_eff, true, nmax, true, false, bytes);
     amrex::Print()<<" Final Knapsack time: " << amrex::second() - time_start << std::endl<<std::endl;
     output_distribution_data(ba, k_dmap, scaled_wgts, "LBC_knapsack.txt", "Knapsack");
+    ComputeGraphCutMetrics(ba, amrex::DistributionMapping(amrex::Vector<int>(k_dmap.begin(), k_dmap.end())), "LBC_knapsack_graph_cut.txt");
+    amrex::MultiFab mf_knapsack(ba, amrex::DistributionMapping(amrex::Vector<int>(k_dmap.begin(), k_dmap.end())), 1, ng);
+    LogHaloExchange(mf_knapsack, "LBC_knapsack_halo_exchange.txt");
 
     time_start = amrex::second();
     std::vector<int> s_dmap = SFCProcessorMapDoIt(ba, scaled_wgts, nranks, &s_eff, node_size, true, false, bytes);
     amrex::Print()<<" Final SFC time: " << amrex::second() - time_start << std::endl<<std::endl;
     output_distribution_data(ba, s_dmap, scaled_wgts, "LBC_sfc.txt", "SFC");
-
-    std::set<int> unique_ranks(s_dmap.begin(), s_dmap.end());
-    amrex::Print() << "Unique ranks in SFC mapping: ";
-    for (auto r : unique_ranks) amrex::Print() << r << " ";
-    amrex::Print() << "\n";
+    ComputeGraphCutMetrics(ba, amrex::DistributionMapping(amrex::Vector<int>(s_dmap.begin(), s_dmap.end())), "LBC_sfc_graph_cut.txt");
+    amrex::MultiFab mf_sfc(ba, amrex::DistributionMapping(amrex::Vector<int>(s_dmap.begin(), s_dmap.end())), 1, ng);
+    LogHaloExchange(mf_sfc, "LBC_sfc_halo_exchange.txt");
 
     time_start = amrex::second();
     std::vector<int> vec=painterPartition(ba,scaled_wgts,nranks);
@@ -210,7 +312,10 @@ for (int r = 0; r<nruns; r++) {
     std::vector<int> hilbertsfc_dmap = HilbertProcessorMapDoIt(ba, scaled_wgts, nranks, &hilbertsfc_eff, ranks_per_node, true, false, bytes);
     amrex::Print()<<" Final Hilbert SFC time: " << amrex::second() - time_start << std::endl;
     output_distribution_data(ba, hilbertsfc_dmap, scaled_wgts, "LBC_hilbert.txt", "Hilbert SFC");
-
+    ComputeGraphCutMetrics(ba, amrex::DistributionMapping(amrex::Vector<int>(hilbertsfc_dmap.begin(), hilbertsfc_dmap.end())), "LBC_hilbert_graph_cut.txt");
+    amrex::MultiFab mf_hilbert(ba, amrex::DistributionMapping(amrex::Vector<int>(hilbertsfc_dmap.begin(), hilbertsfc_dmap.end())), 1, ng);
+    LogHaloExchange(mf_hilbert, "LBC_hilbert_halo_exchange.txt");
+    
     amrex::Print() << "\n=== End of Run " << r + 1 << " ===\n";
     amrex::Print() << "======================================\n\n";
 
@@ -245,7 +350,6 @@ for (int r = 0; r<nruns; r++) {
 // #include "painterPartition.H"
 // // #include "TopologyAware.H"
 // #include "HilbertSFC.H"
-// #include "HilbertSFC_Knapsack.H"
 // #include "heterogeneous/HeterogeneousLB.H"
 
 // // #if defined(AMREX_USE_MPI) || defined(AMREX_USE_GPU)

@@ -49,42 +49,22 @@ void example_main()
     // Try all load balancing strategies
     amrex::Print() << "\nTesting all load balancing strategies:\n";
     
-    // 1. Rij-based balancing
-    amrex::Print() << "\nTesting Rij-based balancing:\n";
-    auto dm_rij = lb.BalanceLoad(ba, weights, "rij");
-    lb.PrintStats();
-    
-    // 2. Knapsack
-    amrex::Print() << "\nTesting Knapsack balancing:\n";
-    auto dm_knapsack = lb.BalanceLoad(ba, weights, "knapsack");
-    lb.PrintStats();
-    
-    // 3. Space-Filling Curve
-    amrex::Print() << "\nTesting Space-Filling Curve balancing:\n";
-    auto dm_sfc = lb.BalanceLoad(ba, weights, "sfc");
-    lb.PrintStats();
-    
-    // 4. Grouped Ranking
-    amrex::Print() << "\nTesting Grouped Rank balancing:\n";
-    auto dm_grouped = lb.BalanceLoad(ba, weights, "grouped");
-    lb.PrintStats();
-    
-    // Simulate some computation and update metrics
-    Vector<double> fake_timings;
+    Vector<std::string> strategies = {"rij", "knapsack", "sfc", "grouped"};
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_real_distribution<> dis(0.9, 1.1);  // 10% variation
-    
-    for (const auto& node : nodes) {
-        // Simulate timing based on node type and current load
-        double base_time = 1.0 / node.performance_factor;
-        fake_timings.push_back(base_time * dis(gen));  // Add some noise
+    for (const auto& strategy : strategies) {
+        amrex::Print() << "\nTesting " << strategy << " balancing:\n";
+        auto dm = lb.BalanceLoad(ba, weights, strategy);
+        lb.PrintStats();
+        // Simulate timings with random noise
+        Vector<double> fake_timings;
+        for (const auto& node : nodes) {
+            double base_time = 1.0 / node.performance_factor;
+            fake_timings.push_back(base_time * dis(gen));
+        }
+        lb.UpdatePerformanceMetrics(fake_timings);
+        amrex::Print() << "\nFinal statistics after performance update:\n";
+        lb.PrintStats();
     }
-    
-    // Update performance metrics with these timings
-    lb.UpdatePerformanceMetrics(fake_timings);
-    
-    // Print final stats
-    amrex::Print() << "\nFinal statistics after performance update:\n";
-    lb.PrintStats();
 } 

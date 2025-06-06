@@ -4,6 +4,7 @@
 #include "HeterogeneousLB.H"
 #include <map>
 #include <iomanip>
+#include <random>
 
 using namespace amrex;
 
@@ -74,23 +75,23 @@ void test_heterogeneous_lb() {
     
     // Test all strategies
     Vector<std::string> strategies = {"rij", "knapsack", "sfc", "grouped"};
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<> dis(0.9, 1.1);  // 10% variation
     for (const auto& strategy : strategies) {
         amrex::Print() << "\nTesting " << strategy << " strategy...\n";
         try {
             auto new_dm = lb.BalanceLoad(ba, weights, strategy);
             verify_distribution(ba, new_dm, nodes, strategy);
             
-            // Simulate some computation
+            // Simulate some computation with random noise
             Vector<double> fake_timings;
             for (const auto& node : nodes) {
-                // Simulate timing based on node performance
-                fake_timings.push_back(1.0 / node.performance_factor);
+                double base_time = 1.0 / node.performance_factor;
+                fake_timings.push_back(base_time * dis(gen));
             }
-            
-            // Update metrics and check results
             lb.UpdatePerformanceMetrics(fake_timings);
             lb.PrintStats();
-            
         } catch (const std::exception& e) {
             amrex::Print() << "Error testing " << strategy << ": " << e.what() << "\n";
         }
@@ -130,12 +131,19 @@ void test_heterogeneous_lb() {
         large_weights[mfi].setVal(box.numPts() * (1.0 + std::exp(-distance/32.0)));
     }
     
-    // Test all strategies with larger system
     for (const auto& strategy : strategies) {
         amrex::Print() << "\nTesting " << strategy << " strategy on larger system...\n";
         try {
             auto new_dm = lb.BalanceLoad(large_ba, large_weights, strategy);
             verify_distribution(large_ba, new_dm, nodes, strategy);
+            // Simulate timings with random noise
+            Vector<double> fake_timings;
+            for (const auto& node : nodes) {
+                double base_time = 1.0 / node.performance_factor;
+                fake_timings.push_back(base_time * dis(gen));
+            }
+            lb.UpdatePerformanceMetrics(fake_timings);
+            lb.PrintStats();
         } catch (const std::exception& e) {
             amrex::Print() << "Error testing " << strategy << " on larger system: " << e.what() << "\n";
         }

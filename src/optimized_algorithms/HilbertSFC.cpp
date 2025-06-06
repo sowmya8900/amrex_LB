@@ -183,7 +183,7 @@ uint64_t coords_to_hilbert(uint32_t x, uint32_t y, uint32_t z, int order) {
     y = std::min(y, size - 1);
     z = std::min(z, size - 1);
 
-    // Call the Princeton LIPS implementation
+    // Call the Gilbert3D implementation
     return generate3d(x, y, z,
                      size, 0, 0,  // width direction
                      0, size, 0,  // height direction
