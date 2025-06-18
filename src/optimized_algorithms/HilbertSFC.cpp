@@ -17,30 +17,29 @@ namespace {
         return (x < 0) ? -1 : ((x > 0) ? 1 : 0);
     }
 
-    // Core recursive function for 3D Hilbert curve generation
-    uint64_t generate3d(int x, int y, int z,
-                       int ax, int ay, int az,
-                       int bx, int by, int bz,
-                       int cx, int cy, int cz,
-                       int bits) {
+    // Direct coordinate-to-index mapping for 3D Hilbert curve
+    uint64_t generate3d_index(int x, int y, int z,
+                             int ax, int ay, int az,
+                             int bx, int by, int bz,
+                             int cx, int cy, int cz) {
         int w = std::abs(ax + ay + az);
         int h = std::abs(bx + by + bz);
         int d = std::abs(cx + cy + cz);
 
         // Unit direction vectors
-        int dax = sgn(ax), day = sgn(ay), daz = sgn(az);  // major direction ("right")
-        int dbx = sgn(bx), dby = sgn(by), dbz = sgn(bz);  // ortho direction ("forward")
-        int dcx = sgn(cx), dcy = sgn(cy), dcz = sgn(cz);  // ortho direction ("up")
+        int dax = sgn(ax), day = sgn(ay), daz = sgn(az);
+        int dbx = sgn(bx), dby = sgn(by), dbz = sgn(bz);
+        int dcx = sgn(cx), dcy = sgn(cy), dcz = sgn(cz);
 
         // Base cases for trivial dimensions
         if (h == 1 && d == 1) {
-            return x | (y << bits) | (z << (2 * bits));
+            return (dax > 0) ? x : (w - 1 - x);
         }
         if (w == 1 && d == 1) {
-            return x | (y << bits) | (z << (2 * bits));
+            return (dby > 0) ? y : (h - 1 - y);
         }
         if (w == 1 && h == 1) {
-            return x | (y << bits) | (z << (2 * bits));
+            return (dcz > 0) ? z : (d - 1 - z);
         }
 
         // Split dimensions
@@ -63,114 +62,124 @@ namespace {
             cx2 += dcx; cy2 += dcy; cz2 += dcz;
         }
 
-        uint64_t index;
-        
         // Wide case: split in w only
         if ((2*w > 3*h) && (2*w > 3*d)) {
             if (x < ax2 + ay2 + az2) {
-                index = generate3d(x, y, z,
-                                 ax2, ay2, az2,
-                                 bx, by, bz,
-                                 cx, cy, cz,
-                                 bits);
+                return generate3d_index(x, y, z,
+                                      ax2, ay2, az2,
+                                      bx, by, bz,
+                                      cx, cy, cz);
             } else {
-                index = generate3d(x-(ax2+ay2+az2), y-(ay2+ay2+az2), z-(az2+az2+az2),
-                                 ax-ax2, ay-ay2, az-az2,
-                                 bx, by, bz,
-                                 cx, cy, cz,
-                                 bits);
+                uint64_t first_part_size = (uint64_t)std::abs(ax2 + ay2 + az2) * h * d;
+                return first_part_size + 
+                       generate3d_index(x - (ax2 + ay2 + az2), 
+                                      y - (ay2), 
+                                      z - (az2),
+                                      ax - ax2, ay - ay2, az - az2,
+                                      bx, by, bz,
+                                      cx, cy, cz);
             }
         }
         // Do not split in d
         else if (3*h > 4*d) {
             if (y < by2 + bz2) {
-                index = generate3d(x, y, z,
-                                 bx2, by2, bz2,
-                                 cx, cy, cz,
-                                 ax2, ay2, az2,
-                                 bits);
+                return generate3d_index(x, y, z,
+                                      bx2, by2, bz2,
+                                      cx, cy, cz,
+                                      ax2, ay2, az2);
             } else if (x < ax + bx2) {
-                index = generate3d(x-bx2, y-by2, z-bz2,
-                                 ax, ay, az,
-                                 bx-bx2, by-by2, bz-bz2,
-                                 cx, cy, cz,
-                                 bits);
+                uint64_t first_part_size = (uint64_t)w * std::abs(bx2 + by2 + bz2) * d;
+                return first_part_size +
+                       generate3d_index(x - bx2, y - by2, z - bz2,
+                                      ax, ay, az,
+                                      bx - bx2, by - by2, bz - bz2,
+                                      cx, cy, cz);
             } else {
-                index = generate3d(x-(ax-dax)-(bx2-dbx),
-                                 y-(ay-day)-(by2-dby),
-                                 z-(az-daz)-(bz2-dbz),
-                                 -bx2, -by2, -bz2,
-                                 cx, cy, cz,
-                                 -(ax-ax2), -(ay-ay2), -(az-az2),
-                                 bits);
+                uint64_t first_part_size = (uint64_t)w * std::abs(bx2 + by2 + bz2) * d;
+                uint64_t second_part_size = (uint64_t)w * std::abs(bx - bx2 + by - by2 + bz - bz2) * d;
+                return first_part_size + second_part_size +
+                       generate3d_index(x - (ax - dax) - (bx2 - dbx),
+                                      y - (ay - day) - (by2 - dby),
+                                      z - (az - daz) - (bz2 - dbz),
+                                      -bx2, -by2, -bz2,
+                                      cx, cy, cz,
+                                      -(ax - ax2), -(ay - ay2), -(az - az2));
             }
         }
         // Do not split in h
         else if (3*d > 4*h) {
             if (z < cz2) {
-                index = generate3d(x, y, z,
-                                 cx2, cy2, cz2,
-                                 ax2, ay2, az2,
-                                 bx, by, bz,
-                                 bits);
+                return generate3d_index(x, y, z,
+                                      cx2, cy2, cz2,
+                                      ax2, ay2, az2,
+                                      bx, by, bz);
             } else if (x < ax + cx2) {
-                index = generate3d(x-cx2, y-cy2, z-cz2,
-                                 ax, ay, az,
-                                 bx, by, bz,
-                                 cx-cx2, cy-cy2, cz-cz2,
-                                 bits);
+                uint64_t first_part_size = (uint64_t)w * h * std::abs(cx2 + cy2 + cz2);
+                return first_part_size +
+                       generate3d_index(x - cx2, y - cy2, z - cz2,
+                                      ax, ay, az,
+                                      bx, by, bz,
+                                      cx - cx2, cy - cy2, cz - cz2);
             } else {
-                index = generate3d(x-(ax-dax)-(cx2-dcx),
-                                 y-(ay-day)-(cy2-dcy),
-                                 z-(az-daz)-(cz2-dcz),
-                                 -cx2, -cy2, -cz2,
-                                 -(ax-ax2), -(ay-ay2), -(az-az2),
-                                 bx, by, bz,
-                                 bits);
+                uint64_t first_part_size = (uint64_t)w * h * std::abs(cx2 + cy2 + cz2);
+                uint64_t second_part_size = (uint64_t)w * h * std::abs(cx - cx2 + cy - cy2 + cz - cz2);
+                return first_part_size + second_part_size +
+                       generate3d_index(x - (ax - dax) - (cx2 - dcx),
+                                      y - (ay - day) - (cy2 - dcy),
+                                      z - (az - daz) - (cz2 - dcz),
+                                      -cx2, -cy2, -cz2,
+                                      -(ax - ax2), -(ay - ay2), -(az - az2),
+                                      bx, by, bz);
             }
         }
         // Regular case: split in all dimensions
         else {
+            uint64_t region_size = (uint64_t)std::abs(bx2 + by2 + bz2) * 
+                                   std::abs(cx2 + cy2 + cz2) * 
+                                   std::abs(ax2 + ay2 + az2);
+            
             if (z < cz2 && y < by2) {
-                index = generate3d(x, y, z,
-                                 bx2, by2, bz2,
-                                 cx2, cy2, cz2,
-                                 ax2, ay2, az2,
-                                 bits);
+                // Region 0
+                return generate3d_index(x, y, z,
+                                      bx2, by2, bz2,
+                                      cx2, cy2, cz2,
+                                      ax2, ay2, az2);
             } else if (z < cz + by2) {
-                index = generate3d(x-bx2, y-by2, z-bz2,
-                                 cx, cy, cz,
-                                 ax2, ay2, az2,
-                                 bx-bx2, by-by2, bz-bz2,
-                                 bits);
+                // Region 1
+                return region_size +
+                       generate3d_index(x - bx2, y - by2, z - bz2,
+                                      cx, cy, cz,
+                                      ax2, ay2, az2,
+                                      bx - bx2, by - by2, bz - bz2);
             } else if (x < ax + bx2 + cx) {
-                index = generate3d(x-(bx2-dbx)-(cx-dcx),
-                                 y-(by2-dby)-(cy-dcy),
-                                 z-(bz2-dbz)-(cz-dcz),
-                                 ax, ay, az,
-                                 -bx2, -by2, -bz2,
-                                 -(cx-cx2), -(cy-cy2), -(cz-cz2),
-                                 bits);
+                // Region 2
+                return 2 * region_size +
+                       generate3d_index(x - (bx2 - dbx) - (cx - dcx),
+                                      y - (by2 - dby) - (cy - dcy),
+                                      z - (bz2 - dbz) - (cz - dcz),
+                                      ax, ay, az,
+                                      -bx2, -by2, -bz2,
+                                      -(cx - cx2), -(cy - cy2), -(cz - cz2));
             } else if (y < by + cy) {
-                index = generate3d(x-(ax-dax)-bx2-(cx-dcx),
-                                 y-(ay-day)-by2-(cy-dcy),
-                                 z-(az-daz)-bz2-(cz-dcz),
-                                 -cx, -cy, -cz,
-                                 -(ax-ax2), -(ay-ay2), -(az-az2),
-                                 bx-bx2, by-by2, bz-bz2,
-                                 bits);
+                // Region 3
+                return 3 * region_size +
+                       generate3d_index(x - (ax - dax) - bx2 - (cx - dcx),
+                                      y - (ay - day) - by2 - (cy - dcy),
+                                      z - (az - daz) - bz2 - (cz - dcz),
+                                      -cx, -cy, -cz,
+                                      -(ax - ax2), -(ay - ay2), -(az - az2),
+                                      bx - bx2, by - by2, bz - bz2);
             } else {
-                index = generate3d(x-(ax-dax)-(bx2-dbx),
-                                 y-(ay-day)-(by2-dby),
-                                 z-(az-daz)-(bz2-dbz),
-                                 -bx2, -by2, -bz2,
-                                 cx2, cy2, cz2,
-                                 -(ax-ax2), -(ay-ay2), -(az-az2),
-                                 bits);
+                // Region 4
+                return 4 * region_size +
+                       generate3d_index(x - (ax - dax) - (bx2 - dbx),
+                                      y - (ay - day) - (by2 - dby),
+                                      z - (az - daz) - (bz2 - dbz),
+                                      -bx2, -by2, -bz2,
+                                      cx2, cy2, cz2,
+                                      -(ax - ax2), -(ay - ay2), -(az - az2));
             }
         }
-
-        return index;
     }
 } // anonymous namespace
 
@@ -183,12 +192,11 @@ uint64_t coords_to_hilbert(uint32_t x, uint32_t y, uint32_t z, int order) {
     y = std::min(y, size - 1);
     z = std::min(z, size - 1);
 
-    // Call the Gilbert3D implementation
-    return generate3d(x, y, z,
-                     size, 0, 0,  // width direction
-                     0, size, 0,  // height direction
-                     0, 0, size,  // depth direction
-                     order);      // bits per dimension
+    // Call the direct mapping implementation
+    return generate3d_index(x, y, z,
+                           size, 0, 0,  // width direction
+                           0, size, 0,  // height direction
+                           0, 0, size); // depth direction
 }
 
 void HilbertDistribute(const std::vector<HilbertSFCToken>& tokens,

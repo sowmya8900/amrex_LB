@@ -1,38 +1,18 @@
-# Domain size
-domain = 32 32 32  # 32^3 domain
+# Heterogeneous Load Balancer Configuration
 
-# Maximum grid size
-max_grid_size = 16 16 16  # 16^3 boxes
-
-# Number of components
-ncomp = 1
-
-# Ghost cells
-nghost = 0 0 0
-
-# Periodicity
-is_periodic = 0 0 0
-
-# System configuration
-nnodes = 3
-ranks_per_node = 1
-
-# Load balancing parameters
-strategy = knapsack  # knapsack, sfc, or grouped
-verbose = 1
+# Domain configuration
+domain = 128 128 128
+max_grid_size = 32 32 32
 
 # Node configuration
-node_types = CPU_AMD_EPYC_7763 CPU_Intel_8380 CPU_AMD_EPYC_7542
-perf_factors = 1.0 0.9 0.8
-memory_caps = 256.0 128.0 128.0
+nnodes = 6
+node_types = "cpu0" "cpu1" "cpu2" "cpu3" "cpu4" "cpu5"
+perf_factors = 1.0 1.0 0.9 0.9 0.8 0.8
+memory_caps = 256.0 256.0 128.0 128.0 128.0 128.0
 
-# Load distribution parameters
-mean = 1.0
-stdev = 0.2
+# Load balancing strategy
+# Options: rij, knapsack, sfc, grouped, all
+strategy = knapsack
 
-# Number of test runs
-nruns = 1
-
-# Optional parameters
-name = test
-scaling = 1.0 
+# Verbosity level
+amrex.v = 1

@@ -237,16 +237,89 @@ def plot_hilbert3d_princeton(width, height, depth, save_path=None):
     else:
         plt.show()
 
+def interleave3(x, y, z):
+    """Interleave the bits of x, y, z to produce a 3D Morton code (Z-order)."""
+    def split_by_3bits(n):
+        n &= 0x1fffff  # 21 bits
+        n = (n | (n << 32)) & 0x1f00000000ffff
+        n = (n | (n << 16)) & 0x1f0000ff0000ff
+        n = (n | (n << 8))  & 0x100f00f00f00f00f
+        n = (n | (n << 4))  & 0x10c30c30c30c30c3
+        n = (n | (n << 2))  & 0x1249249249249249
+        return n
+    return split_by_3bits(x) | (split_by_3bits(y) << 1) | (split_by_3bits(z) << 2)
+
+def morton_curve_points(width, height, depth):
+    """Generate all (x, y, z) points in Morton order for a 3D grid."""
+    points = []
+    for x in range(width):
+        for y in range(height):
+            for z in range(depth):
+                points.append((x, y, z))
+    # Sort by Morton code
+    points.sort(key=lambda p: interleave3(p[0], p[1], p[2]))
+    return np.array(points)
+
+def plot_morton3d(width, height, depth, save_path=None):
+    """Create a visualization of the 3D Morton (Z-order) curve with multiple views."""
+    points = morton_curve_points(width, height, depth)
+    views = [
+        (45, 45),   # Isometric view
+        (0, 0),     # Front view
+        (0, 90),    # Side view
+        (90, 0),    # Top view
+    ]
+    fig = plt.figure(figsize=(20, 5))
+    for idx, (elev, azim) in enumerate(views, 1):
+        ax = fig.add_subplot(1, 4, idx, projection='3d')
+        segments = np.concatenate([points[:-1, None, :], points[1:, None, :]], axis=1)
+        t = np.linspace(0, 1, len(points)-1)
+        colors_array = plt.cm.plasma(t)
+        lc = Line3DCollection(segments, colors=colors_array)
+        ax.add_collection3d(lc)
+        scatter = ax.scatter(points[:, 0], points[:, 1], points[:, 2],
+                           c=np.linspace(0, 1, len(points)),
+                           cmap='plasma', s=20)
+        # Add arrows at regular intervals to show direction
+        arrow_indices = np.linspace(0, len(points)-2, min(20, len(points)-1), dtype=int)
+        for i in arrow_indices:
+            p1, p2 = points[i], points[i+1]
+            direction = p2 - p1
+            midpoint = (p1 + p2) / 2
+            ax.quiver(midpoint[0], midpoint[1], midpoint[2],
+                     direction[0], direction[1], direction[2],
+                     color='red', length=0.1, normalize=True)
+        ax.scatter(*points[0], c='green', s=100, label='Start', marker='*')
+        ax.scatter(*points[-1], c='red', s=100, label='End', marker='*')
+        ax.set_xlabel('X')
+        ax.set_ylabel('Y')
+        ax.set_zlabel('Z')
+        view_names = ['Isometric', 'Front', 'Side', 'Top']
+        ax.set_title(f'{view_names[idx-1]} View')
+        ax.view_init(elev=elev, azim=azim)
+        ax.set_box_aspect([1,1,1])
+        ax.legend()
+        if idx == len(views):
+            plt.colorbar(scatter, ax=ax, label='Position along curve')
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+
 def main():
-    parser = argparse.ArgumentParser(description='Visualize 3D Hilbert curve')
+    parser = argparse.ArgumentParser(description='Visualize 3D space-filling curves')
     parser.add_argument('width', type=int, help='Width of the curve')
     parser.add_argument('height', type=int, help='Height of the curve')
     parser.add_argument('depth', type=int, help='Depth of the curve')
+    parser.add_argument('--curve', '-c', type=str, choices=['hilbert', 'morton'], default='hilbert', help='Curve type to visualize')
     parser.add_argument('--output', '-o', type=str, help='Output file path')
-    
     args = parser.parse_args()
-    
-    plot_hilbert3d_princeton(args.width, args.height, args.depth, args.output)
+    if args.curve == 'hilbert':
+        plot_hilbert3d_princeton(args.width, args.height, args.depth, args.output)
+    else:
+        plot_morton3d(args.width, args.height, args.depth, args.output)
 
 if __name__ == "__main__":
     main() 

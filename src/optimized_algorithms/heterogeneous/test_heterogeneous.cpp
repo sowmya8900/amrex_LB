@@ -9,7 +9,8 @@
 using namespace amrex;
 
 void verify_distribution(const BoxArray& ba, const DistributionMapping& dm, 
-                        const Vector<ComputeNodeInfo>& nodes, const std::string& strategy) {
+                        const Vector<ComputeNodeInfo>& nodes, const std::string& strategy,
+                        const MultiFab& weights, const HeterogeneousLB& lb) {
     // Count boxes per node
     std::map<int, int> boxes_per_node;
     std::map<int, Real> load_per_node;
@@ -20,22 +21,41 @@ void verify_distribution(const BoxArray& ba, const DistributionMapping& dm,
         load_per_node[node_id] += ba[i].numPts();
     }
     
+    // Evaluate load balance quality
+    auto metrics = lb.EvaluateBalance(dm, weights);
+    
     // Print distribution statistics
     amrex::Print() << "\nDistribution Statistics for " << strategy << " strategy:\n";
-    amrex::Print() << std::setw(15) << "Node ID" 
+    amrex::Print() << std::setw(8) << "Node ID" 
                    << std::setw(15) << "CPU Type" 
-                   << std::setw(15) << "Perf Factor"
-                   << std::setw(15) << "Box Count"
-                   << std::setw(15) << "Load\n";
-    amrex::Print() << std::string(75, '-') << "\n";
+                   << std::setw(12) << "Perf Factor"
+                   << std::setw(12) << "Box Count"
+                   << std::setw(15) << "Load"
+                   << std::setw(12) << "Load %" << "\n";
+    amrex::Print() << std::string(84, '-') << "\n";
+    
+    Real total_load = 0.0;
+    for (const auto& pair : load_per_node) {
+        total_load += pair.second;
+    }
     
     for (const auto& node : nodes) {
-        amrex::Print() << std::setw(15) << node.node_id
-                       << std::setw(15) << node.node_type.substr(0, 10)
-                       << std::setw(15) << node.performance_factor
-                       << std::setw(15) << boxes_per_node[node.node_id]
-                       << std::setw(15) << load_per_node[node.node_id] << "\n";
+        Real load_pct = (total_load > 0) ? (load_per_node[node.node_id] / total_load * 100.0) : 0.0;
+        amrex::Print() << std::setw(8) << node.node_id
+                       << std::setw(15) << node.node_type.substr(0, 14)
+                       << std::setw(12) << std::fixed << std::setprecision(3) << node.performance_factor
+                       << std::setw(12) << boxes_per_node[node.node_id]
+                       << std::setw(15) << std::fixed << std::setprecision(1) << load_per_node[node.node_id]
+                       << std::setw(12) << std::fixed << std::setprecision(1) << load_pct << "\n";
     }
+    
+    // Print quality metrics
+    amrex::Print() << "\nLoad Balance Quality Metrics:\n";
+    amrex::Print() << "  Makespan: " << std::fixed << std::setprecision(3) << metrics.makespan << "\n";
+    amrex::Print() << "  Efficiency: " << std::fixed << std::setprecision(3) << metrics.efficiency << "\n";
+    amrex::Print() << "  Load Imbalance: " << std::fixed << std::setprecision(2) 
+                   << (metrics.load_imbalance * 100.0) << "%\n";
+    amrex::Print() << "  Total Work: " << metrics.total_work << "\n";
 }
 
 void test_heterogeneous_lb() {
@@ -43,9 +63,9 @@ void test_heterogeneous_lb() {
     
     // Test Case 1: Basic configuration with 3 different CPU types
     Vector<ComputeNodeInfo> nodes = {
-        {0, "CPU_EPYC_7763", 1.0, 256.0},
-        {1, "CPU_Intel_8380", 0.9, 128.0},
-        {2, "CPU_EPYC_7542", 0.8, 128.0}
+        {0, "cpu0", 1.0, 256.0},
+        {1, "cpu1", 0.9, 128.0},
+        {2, "cpu2", 0.8, 128.0}
     };
     
     // Create and initialize load balancer
@@ -78,11 +98,12 @@ void test_heterogeneous_lb() {
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_real_distribution<> dis(0.9, 1.1);  // 10% variation
+    
     for (const auto& strategy : strategies) {
         amrex::Print() << "\nTesting " << strategy << " strategy...\n";
         try {
             auto new_dm = lb.BalanceLoad(ba, weights, strategy);
-            verify_distribution(ba, new_dm, nodes, strategy);
+            verify_distribution(ba, new_dm, nodes, strategy, weights, lb);
             
             // Simulate some computation with random noise
             Vector<double> fake_timings;
@@ -101,12 +122,12 @@ void test_heterogeneous_lb() {
     amrex::Print() << "\n=== Testing with larger system configuration ===\n";
     
     nodes = {
-        {0, "CPU_EPYC_7763", 1.0, 256.0},
-        {1, "CPU_EPYC_7763", 1.0, 256.0},
-        {2, "CPU_Intel_8380", 0.9, 128.0},
-        {3, "CPU_Intel_8380", 0.9, 128.0},
-        {4, "CPU_EPYC_7542", 0.8, 128.0},
-        {5, "CPU_EPYC_7542", 0.8, 128.0}
+        {0, "cpu0", 1.0, 256.0},
+        {1, "cpu1", 1.0, 256.0},
+        {2, "cpu2", 0.9, 128.0},
+        {3, "cpu3", 0.9, 128.0},
+        {4, "cpu4", 0.8, 128.0},
+        {5, "cpu5", 0.8, 128.0}
     };
     
     lb.InitializeNodes(nodes);
@@ -135,7 +156,8 @@ void test_heterogeneous_lb() {
         amrex::Print() << "\nTesting " << strategy << " strategy on larger system...\n";
         try {
             auto new_dm = lb.BalanceLoad(large_ba, large_weights, strategy);
-            verify_distribution(large_ba, new_dm, nodes, strategy);
+            verify_distribution(large_ba, new_dm, nodes, strategy, large_weights, lb);
+            
             // Simulate timings with random noise
             Vector<double> fake_timings;
             for (const auto& node : nodes) {
@@ -148,4 +170,16 @@ void test_heterogeneous_lb() {
             amrex::Print() << "Error testing " << strategy << " on larger system: " << e.what() << "\n";
         }
     }
-} 
+    
+    // Test Case 3: Performance update test
+    amrex::Print() << "\n=== Testing Performance Updates ===\n";
+    
+    // Test individual node updates
+    for (const auto& node : nodes) {
+        double new_timing = dis(gen) / node.performance_factor;
+        lb.UpdateSingleNodeMetrics(node.node_id, new_timing);
+        amrex::Print() << "Updated node " << node.node_id << " with timing " << new_timing << "\n";
+    }
+    
+    lb.PrintStats();
+}
