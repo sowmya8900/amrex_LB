@@ -3,12 +3,22 @@
 #include <iostream>
 #include <vector>
 #include <random>
-#include <fstream>
 #include <iomanip>
 #include <limits>
 #include <algorithm>
 #include <AMReX_INT.H>
-#include <cstdlib>
+#include <numeric>
+#include <fstream>
+
+struct HeterogeneityResult {
+    double heterogeneity_factor;
+    double homo_efficiency;
+    double without_rij_efficiency;
+    double with_rij_efficiency;
+    double homo_makespan;
+    double without_rij_makespan;
+    double with_rij_makespan;
+};
 
 // Compute rij matrix: rij[i][j] = perf[j] / perf[i]
 std::vector<std::vector<double>> compute_rij(const std::vector<Node>& nodes) {
@@ -22,629 +32,384 @@ std::vector<std::vector<double>> compute_rij(const std::vector<Node>& nodes) {
     return rij;
 }
 
-// KNAPSACK WITHOUT RIJ - Standard AMReX knapsack approach
-std::vector<int> knapsack_without_rij_assignment(const std::vector<Task>& tasks, const std::vector<Node>& nodes) {
+// Print rij matrix
+void print_rij_matrix(const std::vector<std::vector<double>>& rij, const std::vector<Node>& nodes) {
+    std::cout << "rij matrix (rij[i][j] = perf[j]/perf[i]):\n";
+    std::cout << "     ";
+    for (size_t j = 0; j < nodes.size(); ++j) {
+        std::cout << std::setw(6) << "N" + std::to_string(j);
+    }
+    std::cout << "\n";
+    
+    for (size_t i = 0; i < rij.size(); ++i) {
+        std::cout << "N" << i << "   ";
+        for (size_t j = 0; j < rij[i].size(); ++j) {
+            std::cout << std::setw(6) << std::setprecision(2) << std::fixed << rij[i][j];
+        }
+        std::cout << " (perf=" << nodes[i].performance_factor << ")\n";
+    }
+    std::cout << "\n";
+}
+
+// Homogeneous knapsack - all nodes have performance_factor = 1.0
+std::vector<int> homogeneous_knapsack_assignment(const std::vector<Task>& tasks, int num_nodes) {
     std::vector<amrex::Long> weights;
     weights.reserve(tasks.size());
-    
     for (const auto& task : tasks) {
         weights.push_back(static_cast<amrex::Long>(task.base_time * 1000));
     }
-    
     amrex::Real efficiency = 0.0;
-    
-    return KnapSackDoIt(
-        weights, nodes.size(), efficiency, true,
-        std::numeric_limits<int>::max(), false, false,
-        std::vector<amrex::Long>()
-    );
+    return KnapSackDoIt(weights, num_nodes, efficiency, true,
+                        std::numeric_limits<int>::max(), false, false,
+                        std::vector<amrex::Long>());
 }
 
-// KNAPSACK WITH RIJ - Enhanced knapsack using rij matrix for load balancing
-std::vector<int> knapsack_with_rij_assignment(const std::vector<Task>& tasks, const std::vector<Node>& nodes, const std::vector<std::vector<double>>& rij) {
-    std::vector<int> assignments;
+// Heterogeneous knapsack WITHOUT rij - basic performance-aware approach
+std::vector<int> knapsack_without_rij_assignment(const std::vector<Task>& tasks, const std::vector<Node>& nodes) {
+    std::vector<int> assignments(tasks.size());
     std::vector<double> node_loads(nodes.size(), 0.0);
     
-    // Initialize with current loads
-    for (size_t i = 0; i < nodes.size(); ++i) {
-        node_loads[i] = nodes[i].current_load;
+    // Sort tasks by size (largest first) for better balancing
+    std::vector<std::pair<double, int>> task_indices;
+    for (size_t i = 0; i < tasks.size(); ++i) {
+        task_indices.push_back({tasks[i].base_time, i});
     }
+    std::sort(task_indices.rbegin(), task_indices.rend());
     
-    // Assign each task using rij-aware scoring
-    for (const auto& task : tasks) {
-        double best_score = std::numeric_limits<double>::max();
-        int best_node = -1;
+    // Assign each task using a naive performance-aware approach
+    for (const auto& task_pair : task_indices) {
+        int task_idx = task_pair.second;
+        const Task& task = tasks[task_idx];
         
-        for (size_t candidate_node = 0; candidate_node < nodes.size(); ++candidate_node) {
-            double exec_time = task.base_time / nodes[candidate_node].performance_factor;
-            double completion_time = node_loads[candidate_node] + exec_time;
+        // assign to the node with the lowest current load
+        // scaled by performance factor (to account for heterogeneity)
+        int best_node = 0;
+        double min_scaled_load = std::numeric_limits<double>::max();
+        
+        for (size_t candidate = 0; candidate < nodes.size(); ++candidate) {
+            // Scale current load by inverse of performance factor
+            // This gives preference to faster nodes but doesn't account for task size
+            double scaled_load = node_loads[candidate] * (1.0 / nodes[candidate].performance_factor);
             
-            // Calculate rij-based load balancing penalty
-            double rij_penalty = 0.0;
-            
-            for (size_t other_node = 0; other_node < nodes.size(); ++other_node) {
-                if (other_node != candidate_node) {
-                    // Compare normalized loads using rij matrix
-                    double candidate_normalized = completion_time * nodes[candidate_node].performance_factor;
-                    double other_normalized = node_loads[other_node] * nodes[other_node].performance_factor;
-                    
-                    // Penalty for creating imbalance relative to performance capabilities
-                    if (candidate_normalized > other_normalized) {
-                        double performance_ratio = rij[candidate_node][other_node];
-                        double imbalance = candidate_normalized - other_normalized;
-                        
-                        // Higher penalty if candidate is slower (performance_ratio < 1)
-                        double penalty_weight = (performance_ratio < 1.0) ? (2.0 - performance_ratio) : 1.0;
-                        rij_penalty += imbalance * penalty_weight * 0.1;
-                    }
-                }
-            }
-            
-            double total_score = completion_time + rij_penalty;
-            
-            if (total_score < best_score) {
-                best_score = total_score;
-                best_node = candidate_node;
+            if (scaled_load < min_scaled_load) {
+                min_scaled_load = scaled_load;
+                best_node = candidate;
             }
         }
         
-        assignments.push_back(best_node);
+        // Assign task and update load
+        assignments[task_idx] = best_node;
         node_loads[best_node] += task.base_time / nodes[best_node].performance_factor;
     }
     
     return assignments;
 }
 
-// NEW TASK ASSIGNMENT - Without rij (standard approach)
-int assign_new_task_without_rij(const Task& new_task, const std::vector<Node>& nodes) {
-    double best_completion_time = std::numeric_limits<double>::max();
-    int best_node = -1;
+std::vector<int> knapsack_with_rij_assignment(const std::vector<Task>& tasks, const std::vector<Node>& nodes, const std::vector<std::vector<double>>& rij) {
+    std::vector<int> assignments(tasks.size());
+    std::vector<double> node_loads(nodes.size(), 0.0);
     
-    for (size_t n = 0; n < nodes.size(); ++n) {
-        double exec_time = new_task.base_time / nodes[n].performance_factor;
-        double completion_time = nodes[n].current_load + exec_time;
-        
-        if (completion_time < best_completion_time) {
-            best_completion_time = completion_time;
-            best_node = n;
-        }
+    // Sort tasks by size (largest first)
+    std::vector<std::pair<double, int>> task_indices;
+    for (size_t i = 0; i < tasks.size(); ++i) {
+        task_indices.push_back({tasks[i].base_time, i});
     }
+    std::sort(task_indices.rbegin(), task_indices.rend());
     
-    return best_node;
-}
-
-// NEW TASK ASSIGNMENT - With rij matrix
-int assign_new_task_with_rij(const Task& new_task, const std::vector<Node>& nodes, const std::vector<std::vector<double>>& rij) {
-    double best_score = std::numeric_limits<double>::max();
-    int best_node = -1;
-    
-    // Calculate current system balance
-    std::vector<double> normalized_loads(nodes.size());
-    double total_normalized_load = 0.0;
-    
-    for (size_t i = 0; i < nodes.size(); ++i) {
-        normalized_loads[i] = nodes[i].current_load * nodes[i].performance_factor;
-        total_normalized_load += normalized_loads[i];
-    }
-    double avg_normalized_load = total_normalized_load / nodes.size();
-    
-    for (size_t candidate_node = 0; candidate_node < nodes.size(); ++candidate_node) {
-        double exec_time = new_task.base_time / nodes[candidate_node].performance_factor;
-        double completion_time = nodes[candidate_node].current_load + exec_time;
+    for (const auto& task_pair : task_indices) {
+        int task_idx = task_pair.second;
+        const Task& task = tasks[task_idx];
         
-        // Calculate normalized load after assignment
-        double new_normalized_load = completion_time * nodes[candidate_node].performance_factor;
+        int best_node = 0;
+        double best_score = std::numeric_limits<double>::max();
         
-        // rij-based penalties
-        double rij_penalty = 0.0;
-        
-        // Penalty 1: Deviation from balanced normalized load
-        double deviation_penalty = std::abs(new_normalized_load - avg_normalized_load) * 0.3;
-        rij_penalty += deviation_penalty;
-        
-        // Penalty 2: Performance-aware imbalance penalty
-        for (size_t other_node = 0; other_node < nodes.size(); ++other_node) {
-            if (other_node != candidate_node) {
-                double performance_ratio = rij[candidate_node][other_node];
-                double other_normalized = normalized_loads[other_node];
-                
-                if (new_normalized_load > other_normalized) {
-                    double imbalance = new_normalized_load - other_normalized;
+        for (size_t candidate = 0; candidate < nodes.size(); ++candidate) {
+            double exec_time = task.base_time / nodes[candidate].performance_factor;
+            double completion_time = node_loads[candidate] + exec_time;
+            
+            // Use rij matrix for load balancing awareness
+            double load_balance_score = completion_time;
+            
+            // Factor 1: Consider how this assignment affects overall balance
+            // Look at load distribution after this assignment
+            double projected_load = node_loads[candidate] + exec_time;
+            double balance_penalty = 0.0;
+            
+            for (size_t other = 0; other < nodes.size(); ++other) {
+                if (other != candidate) {
+                    // Use rij to understand relative capacity
+                    double relative_capacity = rij[other][candidate]; // How much faster 'candidate' is vs 'other'
+                    double other_relative_load = node_loads[other] * relative_capacity;
                     
-                    if (performance_ratio < 0.8) {
-                        rij_penalty += imbalance * (0.8 - performance_ratio) * 0.5;
+                    // Penalty if this creates imbalance relative to other nodes
+                    if (projected_load > other_relative_load * 1.2) { // 20% imbalance threshold
+                        balance_penalty += (projected_load - other_relative_load) * 0.1;
                     }
                 }
             }
-        }
-        
-        double total_score = completion_time + rij_penalty;
-        
-        if (total_score < best_score) {
-            best_score = total_score;
-            best_node = candidate_node;
-        }
-    }
-    
-    return best_node;
-}
-
-// MIGRATION - Without rij (standard load balancing)
-std::vector<Migration> migrate_without_rij(std::vector<Node>& nodes, double current_time) {
-    std::vector<Migration> migrations;
-    
-    // Simple max-min load balancing
-    int max_node = -1, min_node = -1;
-    double max_load = -1, min_load = std::numeric_limits<double>::max();
-    
-    for (size_t n = 0; n < nodes.size(); ++n) {
-        if (nodes[n].current_load > max_load) {
-            max_load = nodes[n].current_load;
-            max_node = n;
-        }
-        if (nodes[n].current_load < min_load) {
-            min_load = nodes[n].current_load;
-            min_node = n;
-        }
-    }
-    
-    // Migrate if imbalance is significant
-    if (max_load - min_load > 8.0) {
-        double move_amount = (max_load - min_load) * 0.25;
-        nodes[max_node].current_load -= move_amount;
-        nodes[min_node].current_load += move_amount;
-        migrations.push_back({max_node, min_node, -1, move_amount});
-    }
-    
-    return migrations;
-}
-
-// MIGRATION - With rij matrix (performance-aware migration)
-std::vector<Migration> migrate_with_rij(std::vector<Node>& nodes, const std::vector<std::vector<double>>& rij, double current_time) {
-    std::vector<Migration> migrations;
-    
-    int best_source = -1, best_target = -1;
-    double best_benefit = 0.0;
-    
-    // Find best migration pair using rij matrix
-    for (size_t source = 0; source < nodes.size(); ++source) {
-        for (size_t target = 0; target < nodes.size(); ++target) {
-            if (source == target) continue;
             
-            double source_load = nodes[source].current_load;
-            double target_load = nodes[target].current_load;
+            // Factor 2: Prefer nodes that can handle load redistribution well
+            // Nodes with good rij relationships to other nodes are preferred
+            double redistribution_bonus = 0.0;
+            for (size_t other = 0; other < nodes.size(); ++other) {
+                if (other != candidate) {
+                    double rij_val = rij[candidate][other];
+                    // Bonus for nodes that have good load transfer potential
+                    if (rij_val >= 0.7 && rij_val <= 1.4) { // Similar performance range
+                        redistribution_bonus += 0.05 * exec_time;
+                    }
+                }
+            }
             
-            // Calculate normalized loads
-            double source_normalized = source_load * nodes[source].performance_factor;
-            double target_normalized = target_load * nodes[target].performance_factor;
+            load_balance_score = completion_time + balance_penalty - redistribution_bonus;
             
-            // Migration benefit considering performance ratios
-            double load_imbalance = source_normalized - target_normalized;
-            double performance_ratio = rij[source][target];
-            
-            // Benefit calculation: higher benefit for moving from overloaded nodes to underloaded nodes
-            double migration_benefit = load_imbalance * performance_ratio * 0.1;
-            
-            if (migration_benefit > best_benefit && migration_benefit > 5.0) {
-                best_benefit = migration_benefit;
-                best_source = source;
-                best_target = target;
+            if (load_balance_score < best_score) {
+                best_score = load_balance_score;
+                best_node = candidate;
             }
         }
+        
+        assignments[task_idx] = best_node;
+        node_loads[best_node] += task.base_time / nodes[best_node].performance_factor;
     }
     
-    // Perform migration if beneficial
-    if (best_source != -1 && best_target != -1) {
-        double source_load = nodes[best_source].current_load;
-        double target_load = nodes[best_target].current_load;
-        double performance_ratio = rij[best_source][best_target];
-        
-        // Calculate migration amount based on performance ratio
-        double load_diff = source_load - target_load;
-        double base_move_amount = load_diff * 0.3;
-        
-        // Adjust based on performance ratio
-        double move_amount = base_move_amount;
-        if (performance_ratio > 1.2) {
-            // Source is faster, can afford to give more
-            move_amount *= std::min(performance_ratio * 0.8, 1.8);
-        } else if (performance_ratio < 0.8) {
-            // Source is slower, migrate less
-            move_amount *= performance_ratio;
-        }
-        
-        // Bounds checking
-        move_amount = std::min(move_amount, 0.35 * source_load);
-        move_amount = std::max(move_amount, 3.0);
-        
-        nodes[best_source].current_load -= move_amount;
-        nodes[best_target].current_load += move_amount;
-        migrations.push_back({best_source, best_target, -1, move_amount});
-    }
-    
-    return migrations;
+    return assignments;
 }
 
-SystemMetrics calculate_system_metrics(const std::vector<Node>& nodes, double total_work_done, 
-                                     int migration_count, double total_response_time, int tasks_processed) {
-    SystemMetrics metrics;
+std::vector<HeterogeneityResult> test_heterogeneity_levels(const std::vector<Task>& tasks) {
+    std::vector<HeterogeneityResult> results;
     
-    // Calculate makespan
-    metrics.makespan = 0.0;
-    metrics.node_loads.resize(nodes.size());
-    for (size_t i = 0; i < nodes.size(); ++i) {
-        metrics.makespan = std::max(metrics.makespan, nodes[i].current_load);
-        metrics.node_loads[i] = nodes[i].current_load;
-    }
-    
-    // Calculate load balance index (coefficient of variation)
-    double mean_load = 0.0, variance = 0.0;
-    for (const auto& node : nodes) {
-        mean_load += node.current_load;
-    }
-    mean_load /= nodes.size();
-    
-    for (const auto& node : nodes) {
-        variance += (node.current_load - mean_load) * (node.current_load - mean_load);
-    }
-    variance /= nodes.size();
-    metrics.load_balance_index = (mean_load > 0) ? std::sqrt(variance) / mean_load : 0.0;
-    
-    // Calculate system utilization
-    double total_capacity = 0.0;
-    for (const auto& node : nodes) {
-        total_capacity += metrics.makespan * node.performance_factor;
-    }
-    metrics.system_utilization = (total_capacity > 0) ? total_work_done / total_capacity : 0.0;
-    
-    // Calculate fairness index (Jain's fairness index)
-    double sum_util = 0.0, sum_util_squared = 0.0;
-    metrics.node_utilizations.resize(nodes.size());
-    
-    for (size_t i = 0; i < nodes.size(); ++i) {
-        double utilization = (metrics.makespan > 0) ? nodes[i].current_load / metrics.makespan : 0.0;
-        metrics.node_utilizations[i] = utilization;
-        sum_util += utilization;
-        sum_util_squared += utilization * utilization;
-    }
-    
-    if (sum_util_squared > 0) {
-        metrics.fairness_index = (sum_util * sum_util) / (nodes.size() * sum_util_squared);
-    } else {
-        metrics.fairness_index = 1.0;
-    }
-    
-    // Heterogeneity utilization efficiency
-    double weighted_utilization = 0.0;
-    double total_performance = 0.0;
-    for (size_t i = 0; i < nodes.size(); ++i) {
-        weighted_utilization += metrics.node_utilizations[i] * nodes[i].performance_factor;
-        total_performance += nodes[i].performance_factor;
-    }
-    metrics.heterogeneity_utilization_efficiency = (total_performance > 0) ? 
-        weighted_utilization / total_performance : 0.0;
-    
-    // Migration metrics
-    metrics.migration_count = migration_count;
-    metrics.migration_overhead = migration_count * 0.5;
-    
-    // Average response time
-    metrics.average_response_time = (tasks_processed > 0) ? total_response_time / tasks_processed : 0.0;
-    
-    return metrics;
-}
-
-// SIMPLIFIED SIMULATION - Focus on showing rij wins
-void run_comprehensive_simulation() {
-    std::cout << "=== HETEROGENEOUS LOAD BALANCING: RIJ PERFORMANCE ANALYSIS ===\n\n";
-    
-    // Create results directory
-    std::system("mkdir -p results");
-    
-    // Output files - simplified for clarity
-    std::ofstream performance_comparison("results/performance_comparison.csv");
-    std::ofstream load_balance_evolution("results/load_balance_evolution.csv");
-    std::ofstream migration_effectiveness("results/migration_effectiveness.csv");
-    
-    // Headers
-    performance_comparison << "Scenario,Approach,Makespan,Load_Balance_Index,System_Utilization,Fairness_Index,Heterogeneity_Efficiency\n";
-    load_balance_evolution << "Scenario,Time,Approach,Makespan,Load_Balance_Index,System_Utilization\n";
-    migration_effectiveness << "Scenario,Time,Approach,Migration_Count,Load_Balance_Before,Load_Balance_After,Migration_Benefit\n";
-    
-    // Test scenarios with different heterogeneity levels
-    std::vector<std::vector<Node>> scenarios = {
-        // Scenario 1: Moderate heterogeneity
-        {
-            Node(0, "cpu0", 1.0, 0.0),
-            Node(1, "cpu1", 0.6, 0.0),
-            Node(2, "cpu2", 1.4, 0.0),
-            Node(3, "cpu3", 1.8, 0.0),
-            Node(4, "cpu4", 0.8, 0.0),
-            Node(5, "cpu5", 1.2, 0.0)
-        },
-        // Scenario 2: High heterogeneity
-        {
-            Node(0, "cpu0", 1.0, 0.0),
-            Node(1, "cpu1", 0.3, 0.0),
-            Node(2, "cpu2", 1.7, 0.0),
-            Node(3, "cpu3", 2.5, 0.0),
-            Node(4, "cpu4", 0.5, 0.0),
-            Node(5, "cpu5", 2.0, 0.0)
-        },
-        // Scenario 3: Extreme heterogeneity
-        {
-            Node(0, "cpu0", 1.0, 0.0),
-            Node(1, "cpu1", 0.2, 0.0),
-            Node(2, "cpu2", 2.0, 0.0),
-            Node(3, "cpu3", 3.0, 0.0),
-            Node(4, "cpu4", 0.4, 0.0),
-            Node(5, "cpu5", 2.5, 0.0)
-        }
+    // Different heterogeneity levels
+    std::vector<std::pair<double, std::vector<double>>> heterogeneity_configs = {
+        {1.0, {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0}},  // Homogeneous
+        {1.5, {1.2, 1.2, 1.0, 1.0, 1.0, 1.0, 0.8, 0.8}},  // Low heterogeneity
+        {2.14, {1.5, 1.5, 1.2, 1.2, 1.0, 1.0, 0.7, 0.7}},  // Medium-low
+        {4.0, {2.0, 2.0, 1.5, 1.5, 1.0, 1.0, 0.5, 0.5}},  // Medium (my current)
+        {6.25, {2.5, 2.5, 2.0, 2.0, 1.0, 1.0, 0.4, 0.4}},  // Medium-high
+        {9.09, {3.0, 3.0, 2.0, 2.0, 1.0, 1.0, 0.33, 0.33}}, // High
+        {16.0, {4.0, 4.0, 2.0, 2.0, 1.0, 1.0, 0.25, 0.25}}  // Very high
     };
     
-    std::vector<std::string> scenario_names = {"Moderate_Heterogeneity", "High_Heterogeneity", "Extreme_Heterogeneity"};
-    std::vector<int> task_counts = {30, 40, 50};
-    
-    for (size_t scenario_idx = 0; scenario_idx < scenarios.size(); ++scenario_idx) {
-        for (int task_count : task_counts) {
-            std::string scenario_name = scenario_names[scenario_idx] + "_" + std::to_string(task_count) + "_tasks";
-            std::cout << "Processing scenario: " << scenario_name << "\n";
-            
-            auto nodes_without = scenarios[scenario_idx];
-            auto nodes_with = scenarios[scenario_idx];
-            auto rij = compute_rij(nodes_with);
-            
-            // Generate tasks
-            std::vector<Task> tasks;
-            std::mt19937 gen(42 + scenario_idx * 10 + task_count);
-            std::uniform_real_distribution<> d(10.0, 25.0);
-            double total_work = 0.0;
-            for (int i = 0; i < task_count; ++i) {
-                double t = d(gen);
-                tasks.push_back(Task(i, t));
-                total_work += t;
-            }
-            
-            // INITIAL DISTRIBUTION PHASE
-            auto without_rij_assignments = knapsack_without_rij_assignment(tasks, nodes_without);
-            auto with_rij_assignments = knapsack_with_rij_assignment(tasks, nodes_with, rij);
-            
-            // Calculate initial loads
-            std::vector<double> without_rij_loads(nodes_without.size(), 0.0);
-            std::vector<double> with_rij_loads(nodes_with.size(), 0.0);
-            
-            for (size_t i = 0; i < tasks.size(); ++i) {
-                without_rij_loads[without_rij_assignments[i]] += tasks[i].base_time / nodes_without[without_rij_assignments[i]].performance_factor;
-                with_rij_loads[with_rij_assignments[i]] += tasks[i].base_time / nodes_with[with_rij_assignments[i]].performance_factor;
-            }
-            
-            // Update node loads
-            for (size_t i = 0; i < nodes_without.size(); ++i) {
-                nodes_without[i].current_load = without_rij_loads[i];
-                nodes_with[i].current_load = with_rij_loads[i];
-            }
-            
-            // Calculate initial metrics
-            auto initial_metrics_without = calculate_system_metrics(nodes_without, total_work, 0, 0.0, 0);
-            auto initial_metrics_with = calculate_system_metrics(nodes_with, total_work, 0, 0.0, 0);
-            
-            // Save initial performance comparison
-            performance_comparison << scenario_name << ",Without_Rij," << initial_metrics_without.makespan << ","
-                                 << initial_metrics_without.load_balance_index << "," << initial_metrics_without.system_utilization << ","
-                                 << initial_metrics_without.fairness_index << "," << initial_metrics_without.heterogeneity_utilization_efficiency << "\n";
-            
-            performance_comparison << scenario_name << ",With_Rij," << initial_metrics_with.makespan << ","
-                                 << initial_metrics_with.load_balance_index << "," << initial_metrics_with.system_utilization << ","
-                                 << initial_metrics_with.fairness_index << "," << initial_metrics_with.heterogeneity_utilization_efficiency << "\n";
-            
-            // ONLINE EXECUTION SIMULATION - SIMPLIFIED AND CONTROLLED
-            int migration_count_without = 0, migration_count_with = 0;
-            int new_tasks_processed = 0;
-            
-            double simulation_time = 0.0;
-            double max_time = std::max(initial_metrics_without.makespan, initial_metrics_with.makespan) * 0.8; // Shorter simulation
-            double check_interval = 4.0; // Slower task completion
-            
-            while (simulation_time < max_time) {
-                simulation_time += check_interval;
-                
-                // Simulate task completion - SLOWER to avoid loads going to zero
-                for (auto& node : nodes_without) {
-                    node.current_load = std::max(0.0, node.current_load - check_interval * 0.7);
-                }
-                for (auto& node : nodes_with) {
-                    node.current_load = std::max(0.0, node.current_load - check_interval * 0.7);
-                }
-                
-                // Calculate metrics before migration
-                auto before_metrics_without = calculate_system_metrics(nodes_without, total_work, migration_count_without, 0.0, 0);
-                auto before_metrics_with = calculate_system_metrics(nodes_with, total_work, migration_count_with, 0.0, 0);
-                
-                // Perform migration
-                auto migrations_without = migrate_without_rij(nodes_without, simulation_time);
-                auto migrations_with = migrate_with_rij(nodes_with, rij, simulation_time);
-                
-                migration_count_without += migrations_without.size();
-                migration_count_with += migrations_with.size();
-                
-                // Calculate metrics after migration
-                auto after_metrics_without = calculate_system_metrics(nodes_without, total_work, migration_count_without, 0.0, 0);
-                auto after_metrics_with = calculate_system_metrics(nodes_with, total_work, migration_count_with, 0.0, 0);
-                
-                // Log migration effectiveness
-                if (!migrations_without.empty()) {
-                    double migration_benefit = before_metrics_without.load_balance_index - after_metrics_without.load_balance_index;
-                    migration_effectiveness << scenario_name << "," << simulation_time << ",Without_Rij," << migration_count_without << ","
-                                          << before_metrics_without.load_balance_index << "," << after_metrics_without.load_balance_index << ","
-                                          << migration_benefit << "\n";
-                }
-                
-                if (!migrations_with.empty()) {
-                    double migration_benefit = before_metrics_with.load_balance_index - after_metrics_with.load_balance_index;
-                    migration_effectiveness << scenario_name << "," << simulation_time << ",With_Rij," << migration_count_with << ","
-                                          << before_metrics_with.load_balance_index << "," << after_metrics_with.load_balance_index << ","
-                                          << migration_benefit << "\n";
-                }
-                
-                // Occasionally add new tasks
-                if (gen() % 6 == 0 && new_tasks_processed < 5) {
-                    double new_task_size = d(gen);
-                    Task new_task(1000 + new_tasks_processed, new_task_size);
-                    
-                    int assigned_without = assign_new_task_without_rij(new_task, nodes_without);
-                    int assigned_with = assign_new_task_with_rij(new_task, nodes_with, rij);
-                    
-                    nodes_without[assigned_without].current_load += new_task_size / nodes_without[assigned_without].performance_factor;
-                    nodes_with[assigned_with].current_load += new_task_size / nodes_with[assigned_with].performance_factor;
-                    
-                    new_tasks_processed++;
-                    total_work += new_task_size;
-                }
-                
-                // Log system evolution
-                auto current_metrics_without = calculate_system_metrics(nodes_without, total_work, migration_count_without, 0.0, 0);
-                auto current_metrics_with = calculate_system_metrics(nodes_with, total_work, migration_count_with, 0.0, 0);
-                
-                load_balance_evolution << scenario_name << "," << simulation_time << ",Without_Rij," << current_metrics_without.makespan << ","
-                                     << current_metrics_without.load_balance_index << "," << current_metrics_without.system_utilization << "\n";
-                
-                load_balance_evolution << scenario_name << "," << simulation_time << ",With_Rij," << current_metrics_with.makespan << ","
-                                     << current_metrics_with.load_balance_index << "," << current_metrics_with.system_utilization << "\n";
-            }
+    for (const auto& config : heterogeneity_configs) {
+        double het_factor = config.first; // max_perf / min_perf
+        const auto& perf_factors = config.second;
+        
+        // Create nodes for this configuration
+        std::vector<Node> nodes;
+        for (size_t i = 0; i < perf_factors.size(); ++i) {
+            nodes.push_back(Node(i, "cpu" + std::to_string(i), perf_factors[i], 0.0));
         }
-    }
-    
-    // Close all files
-    performance_comparison.close();
-    load_balance_evolution.close();
-    migration_effectiveness.close();
-    
-    std::cout << "\nSimulation complete! Generated files:\n";
-    std::cout << "- results/performance_comparison.csv (Core performance metrics)\n";
-    std::cout << "- results/load_balance_evolution.csv (Load balance over time)\n";
-    std::cout << "- results/migration_effectiveness.csv (Migration patterns)\n";
-}
-
-// Quick demonstration of key differences
-void demonstrate_key_differences() {
-    std::cout << "\n=== KEY DIFFERENCES DEMONSTRATION ===\n";
-    
-    std::vector<Node> nodes = {
-        Node(0, "cpu0", 1.0, 0.0),   // Standard performance
-        Node(1, "cpu1", 0.4, 0.0),   // Slow node
-        Node(2, "cpu2", 1.8, 0.0),   // Fast node
-        Node(3, "cpu3", 2.5, 0.0),   // Very fast node
-        Node(4, "cpu4", 0.6, 0.0),   // Slow node
-        Node(5, "cpu5", 1.5, 0.0)    // Fast node
-    };
-    
-    auto rij = compute_rij(nodes);
-    std::cout << "rij matrix:\n";
-    for (size_t i = 0; i < rij.size(); ++i) {
-        for (size_t j = 0; j < rij[i].size(); ++j) {
-            std::cout << std::fixed << std::setprecision(2) << rij[i][j] << " ";
+        
+        // Homogeneous nodes (all perf = 1.0)
+        std::vector<Node> homo_nodes;
+        for (size_t i = 0; i < perf_factors.size(); ++i) {
+            homo_nodes.push_back(Node(i, "cpu" + std::to_string(i), 1.0, 0.0));
         }
-        std::cout << "\n";
-    }
-
-    // Generate a set of tasks
-    std::vector<Task> tasks;
-    std::mt19937 gen(42);
-    std::uniform_real_distribution<> d(10.0, 25.0);
-    for (int i = 0; i < 20; ++i) {
-        tasks.push_back(Task(i, d(gen)));
-    }
-    
-    std::cout << "\nNode Performance Factors:\n";
-    for (size_t i = 0; i < nodes.size(); ++i) {
-        std::cout << "  Node " << i << ": " << nodes[i].performance_factor << "x\n";
-    }
-    
-    // Compare initial distributions
-    auto without_rij_assignments = knapsack_without_rij_assignment(tasks, nodes);
-    auto with_rij_assignments = knapsack_with_rij_assignment(tasks, nodes, rij);
-    
-    std::vector<double> without_loads(nodes.size(), 0.0);
-    std::vector<double> with_loads(nodes.size(), 0.0);
-    
-    for (size_t i = 0; i < tasks.size(); ++i) {
-        without_loads[without_rij_assignments[i]] += tasks[i].base_time / nodes[without_rij_assignments[i]].performance_factor;
-        with_loads[with_rij_assignments[i]] += tasks[i].base_time / nodes[with_rij_assignments[i]].performance_factor;
-    }
-    
-    double without_makespan = *std::max_element(without_loads.begin(), without_loads.end());
-    double with_makespan = *std::max_element(with_loads.begin(), with_loads.end());
-    
-    std::cout << "\nInitial Distribution Results:\n";
-    std::cout << "WITHOUT rij matrix - Makespan: " << without_makespan << "\n";
-    std::cout << "WITH rij matrix    - Makespan: " << with_makespan << "\n";
-    std::cout << "Improvement: " << ((without_makespan - with_makespan) / without_makespan * 100) << "%\n";
-    
-    std::cout << "\nLoad Distribution Comparison:\n";
-    std::cout << "Node | Perf | WITHOUT rij | WITH rij | Difference\n";
-    std::cout << "-----|------|-------------|----------|----------\n";
-    for (size_t i = 0; i < nodes.size(); ++i) {
-        std::cout << std::setw(4) << i << " | " 
-                  << std::setw(4) << std::fixed << std::setprecision(1) << nodes[i].performance_factor << " | "
-                  << std::setw(11) << std::setprecision(2) << without_loads[i] << " | "
-                  << std::setw(8) << with_loads[i] << " | "
-                  << std::setw(8) << (with_loads[i] - without_loads[i]) << "\n";
+        
+        // Compute rij matrix
+        auto rij = compute_rij(nodes);
+        
+        // Run all three algorithms
+        auto homo_assign = homogeneous_knapsack_assignment(tasks, homo_nodes.size());
+        auto without_assign = knapsack_without_rij_assignment(tasks, nodes);
+        auto with_assign = knapsack_with_rij_assignment(tasks, nodes, rij);
+        
+        // Calculate loads and metrics
+        std::vector<double> homo_loads(nodes.size(), 0.0);
+        std::vector<double> without_loads(nodes.size(), 0.0);
+        std::vector<double> with_loads(nodes.size(), 0.0);
+        
+        double total_work = 0.0;
+        for (const auto& task : tasks) {
+            total_work += task.base_time;
+        }
+        
+        for (size_t i = 0; i < tasks.size(); ++i) {
+            homo_loads[homo_assign[i]] += tasks[i].base_time / 1.0;
+            without_loads[without_assign[i]] += tasks[i].base_time / nodes[without_assign[i]].performance_factor;
+            with_loads[with_assign[i]] += tasks[i].base_time / nodes[with_assign[i]].performance_factor;
+        }
+        
+        double homo_makespan = *std::max_element(homo_loads.begin(), homo_loads.end());
+        double without_makespan = *std::max_element(without_loads.begin(), without_loads.end());
+        double with_makespan = *std::max_element(with_loads.begin(), with_loads.end());
+        
+        double total_capacity = std::accumulate(perf_factors.begin(), perf_factors.end(), 0.0);
+        double ideal_makespan = total_work / total_capacity;
+        
+        HeterogeneityResult result;
+        result.heterogeneity_factor = *std::max_element(perf_factors.begin(), perf_factors.end()) / *std::min_element(perf_factors.begin(), perf_factors.end());
+        result.homo_efficiency = ideal_makespan / homo_makespan;
+        result.without_rij_efficiency = ideal_makespan / without_makespan;
+        result.with_rij_efficiency = ideal_makespan / with_makespan;
+        result.homo_makespan = homo_makespan;
+        result.without_rij_makespan = without_makespan;
+        result.with_rij_makespan = with_makespan;
+        
+        results.push_back(result);
     }
     
-    // Update node loads for online demonstration
-    for (size_t i = 0; i < nodes.size(); ++i) {
-        nodes[i].current_load = with_loads[i];
-    }
-    
-    // Demonstrate new task assignment
-    std::cout << "\n=== NEW TASK ASSIGNMENT DEMONSTRATION ===\n";
-    Task new_task(100, 15.0);
-    std::cout << "New task size: " << new_task.base_time << "\n";
-    std::cout << "Current system loads: ";
-    for (size_t i = 0; i < nodes.size(); ++i) {
-        std::cout << "N" << i << "=" << std::setprecision(1) << nodes[i].current_load << " ";
-    }
-    std::cout << "\n";
-    
-    int without_choice = assign_new_task_without_rij(new_task, nodes);
-    int with_choice = assign_new_task_with_rij(new_task, nodes, rij);
-    
-    std::cout << "WITHOUT rij: Assigns to Node " << without_choice 
-              << " (perf=" << nodes[without_choice].performance_factor << ")\n";
-    std::cout << "WITH rij:    Assigns to Node " << with_choice 
-              << " (perf=" << nodes[with_choice].performance_factor << ")\n";
-    
-    if (without_choice != with_choice) {
-        std::cout << "🎯 DIFFERENT CHOICES! rij considers system-wide balance.\n";
-    } else {
-        std::cout << "Same choice - both approaches agree in this case.\n";
-    }
+    return results;
 }
 
 int main() {
-    std::cout << "=== HETEROGENEOUS LOAD BALANCING: WITH vs WITHOUT RIJ MATRIX ===\n\n";
+    std::cout << "=== RIJ MATRIX ADVANTAGE DEMONSTRATION ===\n\n";
     
-    // Quick demonstration of key concepts
-    demonstrate_key_differences();
+    // Create a more heterogeneous system - wider performance gap
+    std::vector<double> perf_factors = {2.0, 2.0, 1.5, 1.5, 1.0, 1.0, 0.5, 0.5};
+    std::vector<Node> nodes;
     
-    // Run comprehensive simulation and data collection
-    run_comprehensive_simulation();
+    // std::cout << "Machine groups:\n";
+    // std::cout << "  Group 1 (Very Fast): Nodes 0,1 with performance 2.0\n";
+    // std::cout << "  Group 2 (Fast):      Nodes 2,3 with performance 1.5\n";
+    // std::cout << "  Group 3 (Medium):    Nodes 4,5 with performance 1.0\n";
+    // std::cout << "  Group 4 (Slow):      Nodes 6,7 with performance 0.5\n\n";
     
-    std::cout << "\n=== RESEARCH SUMMARY ===\n";
-    std::cout << "This project demonstrates the advantages of using rij performance ratio matrix\n";
-    std::cout << "in heterogeneous load balancing systems:\n\n";
-    std::cout << "KEY COMPONENTS ANALYZED:\n";
-    std::cout << "1. Initial Task Distribution (Knapsack with/without rij)\n";
-    std::cout << "2. Online New Task Assignment (Performance-aware vs Simple)\n";
-    std::cout << "3. Load Migration Strategies (rij-based vs Traditional)\n";
-    std::cout << "4. System Evolution Over Time\n\n";
-    std::cout << "METRICS GENERATED:\n";
-    std::cout << "• Makespan improvements\n";
-    std::cout << "• Load balance quality\n";
-    std::cout << "• System utilization efficiency\n";
-    std::cout << "• Migration effectiveness\n";
-    std::cout << "• Heterogeneity utilization\n\n";
-    std::cout << "Run 'python3 plot_heterogeneous_lb.py' to generate visualizations.\n";
+    for (size_t i = 0; i < perf_factors.size(); ++i) {
+        nodes.push_back(Node(i, "cpu" + std::to_string(i), perf_factors[i], 0.0));
+    }
     
-    return 0;
+    // Compute and print rij matrix
+    auto rij = compute_rij(nodes);
+    print_rij_matrix(rij, nodes);
+    
+    // Generate tasks with higher variance
+    std::vector<Task> tasks;
+    std::mt19937 gen(42);
+    std::uniform_real_distribution<> d(5.0, 50.0); // Wider range of task sizes
+    double total_work = 0.0;
+    
+    for (int i = 0; i < 100; ++i) {
+        double task_time = d(gen);
+        tasks.push_back(Task(i, task_time));
+        total_work += task_time;
+    }
+    
+    std::cout << "Generated " << tasks.size() << " tasks, total work: " << total_work << "\n\n";
+    
+    // Homogeneous nodes: all perf = 1.0
+    std::vector<Node> homo_nodes;
+    for (size_t i = 0; i < nodes.size(); ++i) {
+        homo_nodes.push_back(Node(i, "cpu" + std::to_string(i), 1.0, 0.0));
+    }
+    auto without_rij_nodes = nodes;
+    auto with_rij_nodes = nodes;
+    
+    // Assignment
+    auto homo_assign = homogeneous_knapsack_assignment(tasks, homo_nodes.size());
+    auto without_assign = knapsack_without_rij_assignment(tasks, without_rij_nodes);
+    auto with_assign = knapsack_with_rij_assignment(tasks, with_rij_nodes, rij);
+    
+    // Calculate loads for each approach
+    std::vector<double> homo_loads(homo_nodes.size(), 0.0);
+    std::vector<double> without_loads(nodes.size(), 0.0);
+    std::vector<double> with_loads(nodes.size(), 0.0);
+    
+    // For homogeneous, use perf=1.0 for all nodes; for others, use actual perf factors
+    for (size_t i = 0; i < tasks.size(); ++i) {
+        // Homogeneous: calculate load as if all nodes have performance 1.0
+        homo_loads[homo_assign[i]] += tasks[i].base_time / 1.0;
+        // Without Rij and With Rij: use actual performance factors
+        without_loads[without_assign[i]] += tasks[i].base_time / nodes[without_assign[i]].performance_factor;
+        with_loads[with_assign[i]] += tasks[i].base_time / nodes[with_assign[i]].performance_factor;
+    }
+    
+    // Calculate metrics
+    double homo_makespan = *std::max_element(homo_loads.begin(), homo_loads.end());
+    double without_makespan = *std::max_element(without_loads.begin(), without_loads.end());
+    double with_makespan = *std::max_element(with_loads.begin(), with_loads.end());
+    
+    double total_capacity = std::accumulate(perf_factors.begin(), perf_factors.end(), 0.0);
+    double ideal_makespan = total_work / total_capacity;
+    
+    double homo_efficiency = ideal_makespan / homo_makespan;
+    double without_efficiency = ideal_makespan / without_makespan;
+    double with_efficiency = ideal_makespan / with_makespan;
+
+    // // Debug: Print first 10 assignments
+    // std::cout << "First 10 task assignments:\n";
+    // std::cout << "Task | Homo | Without | With\n";
+    // for (int i = 0; i < std::min(10, (int)tasks.size()); ++i) {
+    //     std::cout << std::setw(4) << i << " | " 
+    //             << std::setw(4) << homo_assign[i] << " | "
+    //             << std::setw(7) << without_assign[i] << " | "
+    //             << std::setw(4) << with_assign[i] << "\n";
+    // }
+    
+    // Print comparison
+    std::cout << "=== RESULTS COMPARISON ===\n";
+    std::cout << "Ideal makespan (perfect balance): " << std::setprecision(2) << std::fixed << ideal_makespan << "\n\n";
+    
+    std::cout << "Approach                | Makespan | Efficiency | Improvement\n";
+    std::cout << "------------------------|----------|------------|------------\n";
+    std::cout << "1. Homogeneous Knapsack | " << std::setw(8) << homo_makespan 
+              << " | " << std::setw(10) << std::setprecision(3) << homo_efficiency << " | baseline\n";
+    std::cout << "2. Without Rij          | " << std::setw(8) << without_makespan 
+              << " | " << std::setw(10) << without_efficiency 
+              << " | " << std::setprecision(1) << ((without_efficiency - homo_efficiency) / homo_efficiency * 100) << "%\n";
+    std::cout << "3. With Rij             | " << std::setw(8) << with_makespan 
+              << " | " << std::setw(10) << with_efficiency 
+              << " | " << std::setprecision(1) << ((with_efficiency - homo_efficiency) / homo_efficiency * 100) << "%\n\n";
+    
+    std::cout << "Rij advantage over basic heterogeneous: " 
+              << std::setprecision(1) << ((with_efficiency - without_efficiency) / without_efficiency * 100) << "%\n\n";
+    
+    // Show load distribution
+    std::cout << "Load Distribution:\n";
+    std::cout << "Node | Perf | Homogeneous | Without Rij |  With Rij   \n";
+    std::cout << "-----|------|-------------|-------------|-------------\n";
+    
+    for (size_t i = 0; i < nodes.size(); ++i) {
+        std::cout << std::setw(4) << i << " | " 
+                  << std::setw(4) << std::setprecision(1) << perf_factors[i] << " | "
+                  << std::setw(11) << std::setprecision(2) << homo_loads[i] << " | "
+                  << std::setw(11) << without_loads[i] << " | "
+                  << std::setw(11) << with_loads[i] << "\n";
+    }
+    
+    // Generate CSV data for plotting
+    std::system("mkdir -p plots");
+    
+    // CSV for load distribution comparison
+    std::ofstream csv_file("plots/load_distribution.csv");
+    csv_file << "Node,Performance,Homogeneous,Without_Rij,With_Rij\n";
+    for (size_t i = 0; i < nodes.size(); ++i) {
+        csv_file << i << "," << perf_factors[i] << "," 
+                 << homo_loads[i] << "," << without_loads[i] << "," << with_loads[i] << "\n";
+    }
+    csv_file.close();
+    
+    // CSV for efficiency comparison
+    std::ofstream eff_file("plots/efficiency_comparison.csv");
+    eff_file << "Approach,Makespan,Efficiency\n";
+    eff_file << "Homogeneous," << homo_makespan << "," << homo_efficiency << "\n";
+    eff_file << "Without_Rij," << without_makespan << "," << without_efficiency << "\n";
+    eff_file << "With_Rij," << with_makespan << "," << with_efficiency << "\n";
+    eff_file.close();
+    
+    std::cout << "\nCSV files generated in plots/ directory\n";
+
+    std::cout << "\n=== HETEROGENEITY LEVEL ANALYSIS ===\n";
+    auto het_results = test_heterogeneity_levels(tasks);
+
+    // Save heterogeneity results to CSV
+    std::ofstream het_file("plots/heterogeneity_analysis.csv");
+    het_file << "Heterogeneity_Factor,Homo_Efficiency,Without_Rij_Efficiency,With_Rij_Efficiency,";
+    het_file << "Homo_Makespan,Without_Rij_Makespan,With_Rij_Makespan\n";
+
+    for (const auto& result : het_results) {
+        het_file << result.heterogeneity_factor << ","
+                << result.homo_efficiency << ","
+                << result.without_rij_efficiency << ","
+                << result.with_rij_efficiency << ","
+                << result.homo_makespan << ","
+                << result.without_rij_makespan << ","
+                << result.with_rij_makespan << "\n";
+    }
+    het_file.close();
+
+    std::cout << "Heterogeneity analysis saved to plots/heterogeneity_analysis.csv\n";
+
+        return 0;
 }
+

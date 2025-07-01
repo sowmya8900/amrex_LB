@@ -32,39 +32,29 @@ struct Migration {
         : source_node(_source), target_node(_target), task_id(_task_id), amount(_amount) {}
 };
 
-// System metrics structure
+// Simplified system metrics structure
 struct SystemMetrics {
     double makespan;
     double load_balance_index;
     double system_utilization;
-    double fairness_index;
-    double heterogeneity_utilization_efficiency;
-    double migration_overhead;
-    double average_response_time;
-    std::vector<double> node_utilizations;
+    double efficiency;
+    double heterogeneity_factor;
     std::vector<double> node_loads;
-    int migration_count;
 };
 
 // Core functions
 std::vector<std::vector<double>> compute_rij(const std::vector<Node>& nodes);
 
-// Initial distribution functions
+// Three main assignment approaches
+std::vector<int> homogeneous_knapsack_assignment(const std::vector<Task>& tasks, const std::vector<Node>& nodes);
 std::vector<int> knapsack_without_rij_assignment(const std::vector<Task>& tasks, const std::vector<Node>& nodes);
 std::vector<int> knapsack_with_rij_assignment(const std::vector<Task>& tasks, const std::vector<Node>& nodes, const std::vector<std::vector<double>>& rij);
 
-// Online task assignment functions
-int assign_new_task_without_rij(const Task& new_task, const std::vector<Node>& nodes);
-int assign_new_task_with_rij(const Task& new_task, const std::vector<Node>& nodes, const std::vector<std::vector<double>>& rij);
+// System metrics calculation
+SystemMetrics calculate_system_metrics(const std::vector<Node>& nodes, double total_work, const std::string& approach_name);
 
-// Migration functions
-std::vector<Migration> migrate_without_rij(std::vector<Node>& nodes, double current_time);
-std::vector<Migration> migrate_with_rij(std::vector<Node>& nodes, const std::vector<std::vector<double>>& rij, double current_time);
-
-// Main simulation function
-void run_comprehensive_simulation();
-
-// Demonstration function
+// Main functions
+void run_performance_comparison();
 void demonstrate_key_differences();
 
 #endif
