@@ -280,10 +280,10 @@ void main_main() {
     std::vector<Long> bytes;
 
     // Initialize metric accumulators
-    MetricsAccumulator knapsack_metrics, sfc_metrics, hilbert_metrics;
+    MetricsAccumulator knapsack_metrics, sfc_metrics, hilbert_metrics, hilbert_painter_metrics;
     
     // Store the last run's distribution data for output
-    std::vector<int> final_k_dmap, final_s_dmap, final_hilbert_dmap;
+    std::vector<int> final_k_dmap, final_s_dmap, final_hilbert_dmap, final_hilbert_painter_dmap;
     std::vector<Long> final_scaled_wgts;
 
     for (int r = 0; r < nruns; r++) {
@@ -300,7 +300,7 @@ void main_main() {
             amrex::Print() << scaled_wgts[i] << " , ";
         }
 
-        amrex::Real sfc_eff = 0.0, knapsack_eff = 0.0, hilbertsfc_eff = 0.0;
+        amrex::Real sfc_eff = 0.0, knapsack_eff = 0.0, hilbertsfc_eff = 0.0, hilbert_painter_eff = 0.0;
         int node_size = 0;
         double time_start = 0;
         int ng = nghost[0];
@@ -331,7 +331,7 @@ void main_main() {
         auto [s_total, s_local, s_cut] = GetGraphCutMetrics(ba, amrex::DistributionMapping(amrex::Vector<int>(s_dmap.begin(), s_dmap.end())));
         sfc_metrics.add_graph_metrics(s_total, s_local, s_cut);
 
-        // Other algorithms (keeping original timing)
+        // SFC + Painter
         time_start = amrex::second();
         std::vector<int> vec = painterPartition(ba, scaled_wgts, nranks);
         amrex::Print() << " Final SFC+Painter time: " << amrex::second() - time_start << std::endl << std::endl;
@@ -357,16 +357,46 @@ void main_main() {
         auto [h_total, h_local, h_cut] = GetGraphCutMetrics(ba, amrex::DistributionMapping(amrex::Vector<int>(hilbertsfc_dmap.begin(), hilbertsfc_dmap.end())));
         hilbert_metrics.add_graph_metrics(h_total, h_local, h_cut);
 
+        // Hilbert + Painter
+        time_start = amrex::second();
+        std::vector<int> hilbert_painter_dmap = painterPartitionHilbert(ba, scaled_wgts, nranks);
+        amrex::Print() << " Final Hilbert+Painter time: " << amrex::second() - time_start << std::endl;
+        
+        {
+            std::vector<amrex::Long> loads(nranks, 0);
+            for (int i = 0; i < scaled_wgts.size(); ++i) {
+                loads[hilbert_painter_dmap[i]] += scaled_wgts[i];
+            }
+            
+            amrex::Long max_load = *std::max_element(loads.begin(), loads.end());
+            amrex::Long total_load = std::accumulate(loads.begin(), loads.end(), 0L);
+            
+            if (max_load > 0) {
+                hilbert_painter_eff = static_cast<amrex::Real>(total_load) / (nranks * max_load);
+            }
+        }
+
+        // Accumulate Hilbert+Painter's metrics
+        hilbert_painter_metrics.add_efficiency(hilbert_painter_eff);
+        amrex::MultiFab mf_hilbert_painter(ba, amrex::DistributionMapping(amrex::Vector<int>(hilbert_painter_dmap.begin(), hilbert_painter_dmap.end())), 1, ng);
+        auto hilbert_painter_halo = GetHaloExchangeVolumes(mf_hilbert_painter);
+        hilbert_painter_metrics.add_halo_volumes(hilbert_painter_halo);
+        auto [hp_total, hp_local, hp_cut] = GetGraphCutMetrics(ba, amrex::DistributionMapping(amrex::Vector<int>(hilbert_painter_dmap.begin(), hilbert_painter_dmap.end())));
+        hilbert_painter_metrics.add_graph_metrics(hp_total, hp_local, hp_cut);
+
+
         // Increment run counters
         knapsack_metrics.increment_run();
         sfc_metrics.increment_run();
         hilbert_metrics.increment_run();
+        hilbert_painter_metrics.increment_run();
 
         // Store final run data for distribution output
         if (r == nruns - 1) {
             final_k_dmap = k_dmap;
             final_s_dmap = s_dmap;
             final_hilbert_dmap = hilbertsfc_dmap;
+            final_hilbert_painter_dmap = hilbert_painter_dmap;
             final_scaled_wgts = scaled_wgts;
         }
 
@@ -381,6 +411,7 @@ void main_main() {
     output_distribution_data(ba, final_k_dmap, final_scaled_wgts, "LBC_knapsack.txt", "Knapsack");
     output_distribution_data(ba, final_s_dmap, final_scaled_wgts, "LBC_sfc.txt", "SFC");
     output_distribution_data(ba, final_hilbert_dmap, final_scaled_wgts, "LBC_hilbert.txt", "Hilbert SFC");
+    output_distribution_data(ba, final_hilbert_painter_dmap, final_scaled_wgts, "LBC_hilbert_painter.txt", "Hilbert Painter");
     
     // Write averaged metrics
     knapsack_metrics.write_averaged_graph_cuts("LBC_knapsack_graph_cut.txt");
@@ -392,6 +423,9 @@ void main_main() {
     hilbert_metrics.write_averaged_graph_cuts("LBC_hilbert_graph_cut.txt");
     hilbert_metrics.write_averaged_halo_exchange("LBC_hilbert_halo_exchange.txt");
 
+    hilbert_painter_metrics.write_averaged_graph_cuts("LBC_hilbert_painter_graph_cut.txt");
+    hilbert_painter_metrics.write_averaged_halo_exchange("LBC_hilbert_painter_halo_exchange.txt");
+
     // Print summary
     amrex::Print() << "\n=== AVERAGED PERFORMANCE SUMMARY ===\n";
     amrex::Print() << "Knapsack - Avg Efficiency: " << knapsack_metrics.get_avg_efficiency() 
@@ -400,6 +434,8 @@ void main_main() {
                    << ", Avg Cut Fraction: " << sfc_metrics.get_avg_cut_fraction() << std::endl;
     amrex::Print() << "Hilbert - Avg Efficiency: " << hilbert_metrics.get_avg_efficiency() 
                    << ", Avg Cut Fraction: " << hilbert_metrics.get_avg_cut_fraction() << std::endl;
+    amrex::Print() << "Hilbert + Painter - Avg Efficiency: " << hilbert_painter_metrics.get_avg_efficiency()
+                   << ", Avg Cut Fraction: " << hilbert_painter_metrics.get_avg_cut_fraction() << std::endl;
 }
 // #include <AMReX.H>
 // #include <AMReX_Random.H>
