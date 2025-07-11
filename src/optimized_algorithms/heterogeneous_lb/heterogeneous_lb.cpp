@@ -89,7 +89,7 @@ std::vector<int> knapsack_without_rij_assignment(const std::vector<Task>& tasks,
         for (size_t candidate = 0; candidate < nodes.size(); ++candidate) {
             // Scale current load by inverse of performance factor
             // This gives preference to faster nodes but doesn't account for task size
-            double scaled_load = node_loads[candidate] * (1.0 / nodes[candidate].performance_factor);
+            double scaled_load = node_loads[candidate] + (task.base_time / nodes[candidate].performance_factor);
             
             if (scaled_load < min_scaled_load) {
                 min_scaled_load = scaled_load;
@@ -108,7 +108,13 @@ std::vector<int> knapsack_without_rij_assignment(const std::vector<Task>& tasks,
 std::vector<int> knapsack_with_rij_assignment(const std::vector<Task>& tasks, const std::vector<Node>& nodes, const std::vector<std::vector<double>>& rij) {
     std::vector<int> assignments(tasks.size());
     std::vector<double> node_loads(nodes.size(), 0.0);
-    
+
+    // Calculate total work
+    double total_work = 0.0;
+    for (const auto& task : tasks) {
+        total_work += task.base_time;
+    }
+
     // Sort tasks by size (largest first)
     std::vector<std::pair<double, int>> task_indices;
     for (size_t i = 0; i < tasks.size(); ++i) {
@@ -134,20 +140,29 @@ std::vector<int> knapsack_with_rij_assignment(const std::vector<Task>& tasks, co
             // Look at load distribution after this assignment
             double projected_load = node_loads[candidate] + exec_time;
             double balance_penalty = 0.0;
-            
+
+            // Calculate load variance among nodes
+            double mean_load = std::accumulate(node_loads.begin(), node_loads.end(), 0.0) / nodes.size();
+            double load_variance = 0.0;
+            for (double load : node_loads) {
+                load_variance += (load - mean_load) * (load - mean_load);
+            }
+            load_variance /= nodes.size();
+
             for (size_t other = 0; other < nodes.size(); ++other) {
                 if (other != candidate) {
                     // Use rij to understand relative capacity
                     double relative_capacity = rij[other][candidate]; // How much faster 'candidate' is vs 'other'
                     double other_relative_load = node_loads[other] * relative_capacity;
-                    
-                    // Penalty if this creates imbalance relative to other nodes
-                    if (projected_load > other_relative_load * 1.2) { // 20% imbalance threshold
-                        balance_penalty += (projected_load - other_relative_load) * 0.1;
+
+                    // Dynamic imbalance threshold based on current loads and variance
+                    double imbalance_threshold = 1.0 + (node_loads[candidate] / (total_work / nodes.size())) + (load_variance * 0.1);
+                    if (projected_load > other_relative_load * imbalance_threshold) {
+                        balance_penalty += (projected_load - other_relative_load) * 0.3;
                     }
                 }
             }
-            
+
             // Factor 2: Prefer nodes that can handle load redistribution well
             // Nodes with good rij relationships to other nodes are preferred
             double redistribution_bonus = 0.0;
@@ -155,24 +170,28 @@ std::vector<int> knapsack_with_rij_assignment(const std::vector<Task>& tasks, co
                 if (other != candidate) {
                     double rij_val = rij[candidate][other];
                     // Bonus for nodes that have good load transfer potential
-                    if (rij_val >= 0.7 && rij_val <= 1.4) { // Similar performance range
-                        redistribution_bonus += 0.05 * exec_time;
+                    if (rij_val >= 0.8 && rij_val <= 1.25) { // Similar performance range
+                        redistribution_bonus += 0.15 * exec_time;
                     }
                 }
             }
-            
-            load_balance_score = completion_time + balance_penalty - redistribution_bonus;
-            
+
+            // Factor 3: Consider node capacity
+            double node_capacity = nodes[candidate].performance_factor;
+            double capacity_bonus = node_capacity * 0.1 * exec_time;
+
+            load_balance_score = completion_time + balance_penalty - redistribution_bonus + capacity_bonus;
+
             if (load_balance_score < best_score) {
                 best_score = load_balance_score;
                 best_node = candidate;
             }
         }
-        
+
         assignments[task_idx] = best_node;
         node_loads[best_node] += task.base_time / nodes[best_node].performance_factor;
     }
-    
+
     return assignments;
 }
 

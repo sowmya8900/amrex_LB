@@ -66,6 +66,24 @@ ax2.plot(step_x, homo_eff_progress, 'o-', label='Homogeneous', color='#ff7f0e', 
 ax2.plot(step_x, without_rij_eff_progress, 's-', label='Without Rij', color='#2ca02c', linewidth=2, markersize=8)
 ax2.plot(step_x, with_rij_eff_progress, '^-', label='With Rij', color='#1f77b4', linewidth=2, markersize=8)
 
+# Add final efficiency annotations
+final_homo_eff = homo_eff_progress[-1]
+final_without_rij_eff = without_rij_eff_progress[-1]
+final_with_rij_eff = with_rij_eff_progress[-1]
+
+ax2.annotate(f'Final: {final_homo_eff:.1f}', 
+            xy=(steps, final_homo_eff), xytext=(steps-2, final_homo_eff + 0.05),
+            arrowprops=dict(arrowstyle='->', color='#ff7f0e'),
+            color='#ff7f0e', fontweight='bold')
+ax2.annotate(f'Final: {final_without_rij_eff:.1f}', 
+            xy=(steps, final_without_rij_eff), xytext=(steps-2, final_without_rij_eff - 0.2),
+            arrowprops=dict(arrowstyle='->', color='#2ca02c'),
+            color='#2ca02c', fontweight='bold')
+ax2.annotate(f'Final: {final_with_rij_eff:.1f}', 
+            xy=(steps, final_with_rij_eff), xytext=(steps-2, final_with_rij_eff + 0.1),
+            arrowprops=dict(arrowstyle='->', color='#1f77b4'),
+            color='#1f77b4', fontweight='bold')
+
 ax2.set_xlabel('Execution Progress (% of tasks assigned)')
 ax2.set_ylabel('System Efficiency')
 ax2.set_title('System Efficiency Evolution')
@@ -97,56 +115,7 @@ het_max = df_het['Heterogeneity_Factor'].max()
 ax3.set_xlim(het_min * 0.9, het_max * 1.1)
 ax3.set_ylim(0.2, 1.0)
 
-# Plot 4: Makespan Evolution (with final annotations)
-homo_progress = np.zeros((steps+1, num_nodes))
-without_rij_progress = np.zeros((steps+1, num_nodes))
-with_rij_progress = np.zeros((steps+1, num_nodes))
-
-homo_final = df_load['Homogeneous'].values
-without_rij_final = df_load['Without_Rij'].values
-with_rij_final = df_load['With_Rij'].values
-
-for i in range(steps+1):
-    factor = i / steps
-    homo_progress[i] = homo_final * factor
-    without_rij_progress[i] = without_rij_final * factor
-    with_rij_progress[i] = with_rij_final * factor
-
-homo_makespan = np.max(homo_progress, axis=1)
-without_rij_makespan = np.max(without_rij_progress, axis=1)
-with_rij_makespan = np.max(with_rij_progress, axis=1)
-
-ax4.plot(np.arange(steps+1), homo_makespan, 'o-', label='Homogeneous', color='#ff7f0e', linewidth=2, markersize=8)
-ax4.plot(np.arange(steps+1), without_rij_makespan, 's-', label='Without Rij', color='#2ca02c', linewidth=2, markersize=8)
-ax4.plot(np.arange(steps+1), with_rij_makespan, '^-', label='With Rij', color='#1f77b4', linewidth=2, markersize=8)
-
-# Add final makespan annotations
-final_homo = homo_makespan[-1]
-final_without = without_rij_makespan[-1]
-final_with = with_rij_makespan[-1]
-
-ax4.annotate(f'Final: {final_homo:.1f}', 
-            xy=(steps, final_homo), xytext=(steps-2, final_homo + 20),
-            arrowprops=dict(arrowstyle='->', color='#ff7f0e'),
-            color='#ff7f0e', fontweight='bold')
-ax4.annotate(f'Final: {final_without:.1f}', 
-            xy=(steps, final_without), xytext=(steps-2, final_without + 20),
-            arrowprops=dict(arrowstyle='->', color='#2ca02c'),
-            color='#2ca02c', fontweight='bold')
-ax4.annotate(f'Final: {final_with:.1f}', 
-            xy=(steps, final_with), xytext=(steps-2, final_with - 20),
-            arrowprops=dict(arrowstyle='->', color='#1f77b4'),
-            color='#1f77b4', fontweight='bold')
-
-ax4.set_xlabel('Execution Progress (% of tasks assigned)')
-ax4.set_ylabel('Current Makespan')
-ax4.set_title('Makespan Evolution During Task Assignment')
-ax4.grid(True, alpha=0.3)
-ax4.legend(loc='upper left')
-ax4.set_xticks(np.arange(steps+1))
-ax4.set_xticklabels([f'{int(x*100/steps)}%' for x in np.arange(steps+1)])
-
-# Plot 5: Per-Node Load Utilization
+# Plot 4: Per-Node Load Utilization
 total_work = 2685.08
 total_capacity = df_load['Performance'].sum()
 
@@ -168,39 +137,88 @@ for i in range(len(df_load)):
     with_rij_utilization.append(with_actual / optimal_execution_time if optimal_execution_time > 0 else 1.0)
 
 node_ids = df_load['Node'].values
-ax5.plot(node_ids, homo_utilization, 'o-', label='Homogeneous', color='#ff7f0e', linewidth=3, markersize=10)
-ax5.plot(node_ids, without_rij_utilization, 's-', label='Without Rij', color='#2ca02c', linewidth=3, markersize=10)
-ax5.plot(node_ids, with_rij_utilization, '^-', label='With Rij', color='#1f77b4', linewidth=3, markersize=10)
+ax4.plot(node_ids, homo_utilization, 'o-', label='Homogeneous', color='#ff7f0e', linewidth=3, markersize=10)
+ax4.plot(node_ids, without_rij_utilization, 's-', label='Without Rij', color='#2ca02c', linewidth=3, markersize=10)
+ax4.plot(node_ids, with_rij_utilization, '^-', label='With Rij', color='#1f77b4', linewidth=3, markersize=10)
 
-ax5.set_xlabel('Node ID')
-ax5.set_ylabel('Node Utilization (Actual/Optimal Load)')
-ax5.set_title('Per-Node Load Utilization\n(1.0 = Perfect, >1.0 = Overloaded, <1.0 = Underloaded)')
-ax5.grid(True, alpha=0.3)
-ax5.legend(loc='upper left')
-ax5.set_xticks(node_ids)
-ax5.set_xticklabels([f'N{i}\n({perf}x)' for i, perf in zip(df_load['Node'], df_load['Performance'])])
+ax4.set_xlabel('Node ID')
+ax4.set_ylabel('Node Utilization (Actual/Optimal Load)')
+ax4.set_title('Per-Node Load Utilization\n(1.0 = Perfect, >1.0 = Overloaded, <1.0 = Underloaded)')
+ax4.grid(True, alpha=0.3)
+ax4.legend(loc='upper left')
+ax4.set_xticks(node_ids)
+ax4.set_xticklabels([f'N{i}\n({perf}x)' for i, perf in zip(df_load['Node'], df_load['Performance'])])
 
 # Set y-axis range
 all_utils = homo_utilization + without_rij_utilization + with_rij_utilization
 y_min = max(0, min(all_utils) * 0.9)
 y_max = max(all_utils) * 1.1
-ax5.set_ylim(y_min, y_max)
+ax4.set_ylim(y_min, y_max)
 
 # Add perfect balance line
-ax5.axhline(y=1.0, color='gray', linestyle='--', alpha=0.8, linewidth=2)
-ax5.text(len(node_ids)/2, 1.0, 'Perfect Balance', ha='center', va='bottom', 
+ax4.axhline(y=1.0, color='gray', linestyle='--', alpha=0.8, linewidth=2)
+ax4.text(len(node_ids)/2, 1.0, 'Perfect Balance', ha='center', va='bottom', 
          color='gray', fontweight='bold', bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
 
 # Add shaded regions
-ax5.axhspan(1.0, y_max, alpha=0.1, color='red')
-ax5.axhspan(y_min, 1.0, alpha=0.1, color='blue')
+ax4.axhspan(1.0, y_max, alpha=0.1, color='red')
+ax4.axhspan(y_min, 1.0, alpha=0.1, color='blue')
 
 # Performance factor reference
-ax5_twin = ax5.twinx()
-ax5_twin.set_ylim(0, 2.5)
-ax5_twin.plot(node_ids, df_load['Performance'].values, 'k--', alpha=0.7, linewidth=2, label='Performance Factor')
-ax5_twin.set_ylabel('Performance Factor', alpha=0.7)
-ax5_twin.legend(loc='upper right', bbox_to_anchor=(0.98, 0.85))
+ax4_twin = ax4.twinx()
+ax4_twin.set_ylim(0, 2.5)
+ax4_twin.plot(node_ids, df_load['Performance'].values, 'k--', alpha=0.7, linewidth=2, label='Performance Factor')
+ax4_twin.set_ylabel('Performance Factor', alpha=0.7)
+ax4_twin.legend(loc='upper right', bbox_to_anchor=(0.98, 0.85))
+
+# Plot 5: Makespan Evolution (with final annotations)
+homo_progress = np.zeros((steps+1, num_nodes))
+without_rij_progress = np.zeros((steps+1, num_nodes))
+with_rij_progress = np.zeros((steps+1, num_nodes))
+
+homo_final = df_load['Homogeneous'].values
+without_rij_final = df_load['Without_Rij'].values
+with_rij_final = df_load['With_Rij'].values
+
+for i in range(steps+1):
+    factor = i / steps
+    homo_progress[i] = homo_final * factor
+    without_rij_progress[i] = without_rij_final * factor
+    with_rij_progress[i] = with_rij_final * factor
+
+homo_makespan = np.max(homo_progress, axis=1)
+without_rij_makespan = np.max(without_rij_progress, axis=1)
+with_rij_makespan = np.max(with_rij_progress, axis=1)
+
+ax5.plot(np.arange(steps+1), homo_makespan, 'o-', label='Homogeneous', color='#ff7f0e', linewidth=2, markersize=8)
+ax5.plot(np.arange(steps+1), without_rij_makespan, 's-', label='Without Rij', color='#2ca02c', linewidth=2, markersize=8)
+ax5.plot(np.arange(steps+1), with_rij_makespan, '^-', label='With Rij', color='#1f77b4', linewidth=2, markersize=8)
+
+# Add final makespan annotations
+final_homo = homo_makespan[-1]
+final_without = without_rij_makespan[-1]
+final_with = with_rij_makespan[-1]
+
+ax5.annotate(f'Final: {final_homo:.1f}', 
+            xy=(steps, final_homo), xytext=(steps-3, final_homo + 5),
+            arrowprops=dict(arrowstyle='->', color='#ff7f0e'),
+            color='#ff7f0e', fontweight='bold')
+ax5.annotate(f'Final: {final_without:.1f}', 
+            xy=(steps, final_without), xytext=(steps-2, final_without + 5),
+            arrowprops=dict(arrowstyle='->', color='#2ca02c'),
+            color='#2ca02c', fontweight='bold')
+ax5.annotate(f'Final: {final_with:.1f}', 
+            xy=(steps, final_with), xytext=(steps-2, final_with - 40),
+            arrowprops=dict(arrowstyle='->', color='#1f77b4'),
+            color='#1f77b4', fontweight='bold')
+
+ax5.set_xlabel('Execution Progress (% of tasks assigned)')
+ax5.set_ylabel('Current Makespan')
+ax5.set_title('Makespan Evolution During Task Assignment')
+ax5.grid(True, alpha=0.3)
+ax5.legend(loc='upper left')
+ax5.set_xticks(np.arange(steps+1))
+ax5.set_xticklabels([f'{int(x*100/steps)}%' for x in np.arange(steps+1)])
 
 # Plot 6: Heterogeneity Level Analysis - Makespan
 ax6.plot(df_het['Heterogeneity_Factor'], df_het['Homo_Makespan'], 
