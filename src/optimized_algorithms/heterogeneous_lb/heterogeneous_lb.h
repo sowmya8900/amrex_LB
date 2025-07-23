@@ -22,39 +22,12 @@ struct Task {
     Task(int _id, double _time) : id(_id), base_time(_time) {}
 };
 
-struct Migration {
-    int source_node;
-    int target_node;
-    int task_id;
-    double amount;
-    
-    Migration(int _source, int _target, int _task_id, double _amount)
-        : source_node(_source), target_node(_target), task_id(_task_id), amount(_amount) {}
-};
-
-// Simplified system metrics structure
-struct SystemMetrics {
-    double makespan;
-    double load_balance_index;
-    double system_utilization;
-    double efficiency;
-    double heterogeneity_factor;
-    std::vector<double> node_loads;
-};
-
 // Core functions
 std::vector<std::vector<double>> compute_rij(const std::vector<Node>& nodes);
 
 // Three main assignment approaches
 std::vector<int> homogeneous_knapsack_assignment(const std::vector<Task>& tasks, const std::vector<Node>& nodes);
-std::vector<int> knapsack_without_rij_assignment(const std::vector<Task>& tasks, const std::vector<Node>& nodes);
-std::vector<int> knapsack_with_rij_assignment(const std::vector<Task>& tasks, const std::vector<Node>& nodes, const std::vector<std::vector<double>>& rij);
-
-// System metrics calculation
-SystemMetrics calculate_system_metrics(const std::vector<Node>& nodes, double total_work, const std::string& approach_name);
-
-// Main functions
-void run_performance_comparison();
-void demonstrate_key_differences();
+std::vector<int> performance_aware_knapsack_assignment(const std::vector<Task>& tasks, const std::vector<Node>& nodes);
+std::vector<int> relation_aware_knapsack_assignment(const std::vector<Task>& tasks, const std::vector<Node>& nodes, const std::vector<std::vector<double>>& rij);
 
 #endif
