@@ -14,6 +14,15 @@
 #include "Knapsack.H"
 #include "LeastUsed.H"
 
+
+struct PairHash {
+    std::size_t operator()(const std::pair<int, int>& p) const {
+        auto h1 = std::hash<int>{}(p.first);
+        auto h2 = std::hash<int>{}(p.second);
+        return h1 ^ (h2 << 1);
+    }
+};
+
 namespace {
     // Helper function to get sign of a number
     inline int sgn(int x) {
@@ -163,24 +172,53 @@ namespace {
         }
     }
 
-    std::vector<std::tuple<int, int, int>> gilbert3d(int width, int height, int depth) {
+    std::vector<std::tuple<int, int, int>> gilbert3d(int width, int height, int depth, 
+                                                    HilbertDirection direction = HilbertDirection::DEFAULT) {
         std::vector<std::tuple<int, int, int>> points;
         
-        if (width >= height && width >= depth) {
-            generate3d_points(0, 0, 0,
-                            width, 0, 0,
-                            0, height, 0,
-                            0, 0, depth, points);
-        } else if (height >= width && height >= depth) {
-            generate3d_points(0, 0, 0,
-                            0, height, 0,
-                            width, 0, 0,
-                            0, 0, depth, points);
-        } else {
-            generate3d_points(0, 0, 0,
-                            0, 0, depth,
-                            width, 0, 0,
-                            0, height, 0, points);
+        // Choose starting orientation based on direction
+        switch (direction) {
+            case HilbertDirection::X_MAJOR:
+                generate3d_points(0, 0, 0,
+                                width, 0, 0,
+                                0, height, 0,
+                                0, 0, depth, points);
+                break;
+                
+            case HilbertDirection::Y_MAJOR:
+                generate3d_points(0, 0, 0,
+                                0, height, 0,
+                                width, 0, 0,
+                                0, 0, depth, points);
+                break;
+                
+            case HilbertDirection::Z_MAJOR:
+                generate3d_points(0, 0, 0,
+                                0, 0, depth,
+                                width, 0, 0,
+                                0, height, 0, points);
+                break;
+                
+            case HilbertDirection::DEFAULT:
+            default:
+                // Your original logic
+                if (width >= height && width >= depth) {
+                    generate3d_points(0, 0, 0,
+                                    width, 0, 0,
+                                    0, height, 0,
+                                    0, 0, depth, points);
+                } else if (height >= width && height >= depth) {
+                    generate3d_points(0, 0, 0,
+                                    0, height, 0,
+                                    width, 0, 0,
+                                    0, 0, depth, points);
+                } else {
+                    generate3d_points(0, 0, 0,
+                                    0, 0, depth,
+                                    width, 0, 0,
+                                    0, height, 0, points);
+                }
+                break;
         }
         
         return points;
@@ -188,7 +226,8 @@ namespace {
 
 } // anonymous namespace
 
-uint64_t coords_to_hilbert(uint32_t x, uint32_t y, uint32_t z, int order) {
+uint64_t coords_to_hilbert(uint32_t x, uint32_t y, uint32_t z, int order, 
+                          HilbertDirection direction) {
     uint32_t size = 1 << order;
     
     // Ensure coordinates are within bounds
@@ -197,7 +236,7 @@ uint64_t coords_to_hilbert(uint32_t x, uint32_t y, uint32_t z, int order) {
     z = std::min(z, size - 1);
 
     // Use lookup table for reasonable orders
-    static std::unordered_map<int, std::unordered_map<uint64_t, uint64_t>> cache;
+    static std::unordered_map<std::pair<int, int>, std::unordered_map<uint64_t, uint64_t>, PairHash> cache;
 
     static bool first_call = true;
     if (first_call) {
@@ -205,12 +244,14 @@ uint64_t coords_to_hilbert(uint32_t x, uint32_t y, uint32_t z, int order) {
         first_call = false;
     }
     
-    if (cache[order].empty() && order <= 8) {  // Only cache up to 256^3
-        // Build lookup table using gilbert3d
-        auto points = gilbert3d(size, size, size);
+    std::pair<int, int> cache_key = {order, static_cast<int>(direction)};
+    
+    if (cache[cache_key].empty() && order <= 8) {  // Only cache up to 256^3
+        // Build lookup table using gilbert3d with direction
+        auto points = gilbert3d(size, size, size, direction);
         
         // Reserve space for better performance
-        cache[order].reserve(points.size());
+        cache[cache_key].reserve(points.size());
         
         // Build the coordinate -> index mapping
         for (uint64_t i = 0; i < points.size(); ++i) {
@@ -222,7 +263,7 @@ uint64_t coords_to_hilbert(uint32_t x, uint32_t y, uint32_t z, int order) {
             }
             
             uint64_t key = (uint64_t(px) << 20) | (uint64_t(py) << 10) | uint64_t(pz);
-            cache[order][key] = i;
+            cache[cache_key][key] = i;
         }
     }
     
@@ -230,8 +271,8 @@ uint64_t coords_to_hilbert(uint32_t x, uint32_t y, uint32_t z, int order) {
         // Ensure coordinates fit in 10 bits each for key encoding
         if (x < (1 << 10) && y < (1 << 10) && z < (1 << 10)) {
             uint64_t key = (uint64_t(x) << 20) | (uint64_t(y) << 10) | uint64_t(z);
-            auto it = cache[order].find(key);
-            if (it != cache[order].end()) {
+            auto it = cache[cache_key].find(key);
+            if (it != cache[cache_key].end()) {
                 return it->second;
             }
         }
@@ -294,7 +335,8 @@ HilbertProcessorMapDoIt(const amrex::BoxArray& boxes,
                        int node_size,
                        bool flag_verbose_mapper,
                        bool sort,
-                       const std::vector<amrex::Long>& bytes) {
+                       const std::vector<amrex::Long>& bytes,
+                       HilbertDirection direction) {
     if (flag_verbose_mapper) {
         amrex::Print() << "DM: HilbertProcessorMapDoIt called..." << std::endl;
     }
@@ -328,7 +370,7 @@ HilbertProcessorMapDoIt(const amrex::BoxArray& boxes,
     tokens.reserve(N);
     for (int i = 0; i < N; ++i) {
         const amrex::Box& bx = boxes[i];
-        tokens.push_back(makeHilbertSFCToken(i, bx.smallEnd()));
+        tokens.push_back(makeHilbertSFCToken(i, bx.smallEnd(), direction));
     }
 
     // Sort tokens along Hilbert curve
@@ -457,4 +499,119 @@ HilbertProcessorMapDoIt(const amrex::BoxArray& boxes,
     }
 
     return result;
+}
+
+// Add this new function to test all directions
+std::vector<int>
+HilbertProcessorMapDoItWithDirectionTesting(const amrex::BoxArray& boxes,
+                                           const std::vector<amrex::Long>& wgts,
+                                           int nprocs,
+                                           amrex::Real* best_eff,
+                                           int node_size,
+                                           bool flag_verbose_mapper,
+                                           bool sort,
+                                           const std::vector<amrex::Long>& bytes) {
+    
+    if (flag_verbose_mapper) {
+        amrex::Print() << "\n=== Testing All Hilbert Directions ===\n";
+    }
+    
+    // Test all 4 directions
+    std::vector<HilbertDirection> directions = {
+        HilbertDirection::DEFAULT,
+        HilbertDirection::X_MAJOR,
+        HilbertDirection::Y_MAJOR,
+        HilbertDirection::Z_MAJOR
+    };
+    
+    std::vector<std::string> direction_names = {
+        "DEFAULT", "X_MAJOR", "Y_MAJOR", "Z_MAJOR"
+    };
+    
+    std::vector<int> best_result;
+    amrex::Real best_efficiency = 0.0;
+    amrex::Real best_load_variance = 1e9;
+    std::string best_direction_name;
+    
+    // Test each direction
+    for (size_t d = 0; d < directions.size(); ++d) {
+        if (flag_verbose_mapper) {
+            amrex::Print() << "\n--- Testing " << direction_names[d] << " ---\n";
+        }
+        
+        // Run Hilbert with this direction - FIXED: Call the actual function, not itself
+        amrex::Real current_eff = 0.0;
+        auto current_result = HilbertProcessorMapDoIt(boxes, wgts, nprocs, 
+                                                     &current_eff, node_size, 
+                                                     false, // Don't print individual results
+                                                     sort, bytes, directions[d]);
+        
+        // Calculate load distribution statistics
+        std::vector<amrex::Long> rank_loads(nprocs, 0);
+        for (size_t i = 0; i < wgts.size(); ++i) {
+            rank_loads[current_result[i]] += wgts[i];
+        }
+        
+        // Calculate variance and other metrics
+        amrex::Real mean_load = 0.0;
+        amrex::Real max_load = 0.0;
+        amrex::Real min_load = 1e9;
+        
+        for (int i = 0; i < nprocs; ++i) {
+            mean_load += rank_loads[i];
+            max_load = std::max(max_load, (amrex::Real)rank_loads[i]);
+            min_load = std::min(min_load, (amrex::Real)rank_loads[i]);
+        }
+        mean_load /= nprocs;
+        
+        amrex::Real variance = 0.0;
+        for (int i = 0; i < nprocs; ++i) {
+            amrex::Real diff = rank_loads[i] - mean_load;
+            variance += diff * diff;
+        }
+        variance /= nprocs;
+        
+        amrex::Real load_balance_ratio = min_load / max_load;
+        amrex::Real coefficient_of_variation = sqrt(variance) / mean_load;
+        
+        if (flag_verbose_mapper) {
+            amrex::Print() << "  " << direction_names[d] << " Results:\n";
+            amrex::Print() << "    Efficiency: " << current_eff << "\n";
+            amrex::Print() << "    Load Variance: " << variance << "\n";
+            amrex::Print() << "    Load Balance Ratio: " << load_balance_ratio << "\n";
+            amrex::Print() << "    Coefficient of Variation: " << coefficient_of_variation << "\n";
+            amrex::Print() << "    Max Load: " << max_load << "\n";
+            amrex::Print() << "    Min Load: " << min_load << "\n";
+        }
+        
+        // Determine if this is the best direction
+        // You can change this criteria based on what you prioritize
+        bool is_better = false;
+        
+        // Option 1: Prioritize efficiency
+        if (current_eff > best_efficiency) {
+            is_better = true;
+        }
+        // Option 2: If efficiency is close, prefer lower variance
+        else if (std::abs(current_eff - best_efficiency) < 0.001 && 
+                 variance < best_load_variance) {
+            is_better = true;
+        }
+        
+        if (is_better || best_result.empty()) {
+            best_result = current_result;
+            best_efficiency = current_eff;
+            best_load_variance = variance;
+            best_direction_name = direction_names[d];
+        }
+    }
+    
+    if (flag_verbose_mapper) {
+        amrex::Print() << "\n=== BEST DIRECTION: " << best_direction_name << " ===\n";
+        amrex::Print() << "Best Efficiency: " << best_efficiency << "\n";
+        amrex::Print() << "Best Load Variance: " << best_load_variance << "\n";
+    }
+    
+    if (best_eff) *best_eff = best_efficiency;
+    return best_result;
 }

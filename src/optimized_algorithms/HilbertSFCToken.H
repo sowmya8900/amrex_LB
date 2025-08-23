@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <AMReX_IntVect.H>
+#include "HilbertDirection.H"  // Include the enum
 
 struct HilbertSFCToken {
     class Compare {
@@ -14,6 +15,7 @@ struct HilbertSFCToken {
     uint64_t m_hilbert_key;
 };
 
-HilbertSFCToken makeHilbertSFCToken(int box_index, amrex::IntVect const& iv);
+HilbertSFCToken makeHilbertSFCToken(int box_index, amrex::IntVect const& iv, 
+                                   HilbertDirection direction = HilbertDirection::DEFAULT);
 
 #endif

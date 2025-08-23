@@ -63,8 +63,7 @@ long findMax(vector<long> wgts, int n, int k) {
     return dp[k][n]; 
 } 
 
-bool isPartitionPossible(vector<long> wgts, int n, int number_of_ranks, long maxWeight)
-{
+bool isPartitionPossible(vector<long> wgts, int n, int number_of_ranks, long maxWeight) {
     long long currWeight=0, worker=1;
     for(int i=0;i<n;i++)
     {
@@ -79,8 +78,7 @@ bool isPartitionPossible(vector<long> wgts, int n, int number_of_ranks, long max
     return true;   
 }
 
-long minWeight(vector<long> wgts, int n, int k)
-{
+long minWeight(vector<long> wgts, int n, int k) {
     // code here
     // return minimum time
     long long sum=0,max=wgts[0];
@@ -91,7 +89,13 @@ long minWeight(vector<long> wgts, int n, int k)
             max=wgts[i];
         }
     }
-    long long h=sum,l=max,mid,res;
+
+    long long avg = sum / k;
+    long long l = (max > avg) ? max : avg;  // max(largest_task, average_load)
+    long long h = avg + max;                // average_load + largest_task
+    
+    long long mid, res = h;
+    int numIterations = 0;
     while(l<=h){
         mid=l+(h-l)/2;
         if(isPartitionPossible(wgts,n,k,mid)){
@@ -101,7 +105,9 @@ long minWeight(vector<long> wgts, int n, int k)
         else{
             l=mid+1;
         }
+        numIterations++;
     }
+    amrex::Print() << "Binary search iterations: " << numIterations << '\n';
     return res;
 }
 
